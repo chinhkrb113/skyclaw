@@ -147,6 +147,7 @@ async fn main() -> Result<()> {
                 None,
                 config.agent.max_turns,
                 config.agent.max_context_tokens,
+                config.agent.max_tool_rounds,
             ));
 
             // Unified message channel — all sources (Telegram, heartbeat, future

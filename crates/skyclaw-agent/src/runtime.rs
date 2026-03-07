@@ -15,9 +15,6 @@ use tracing::{debug, info, warn};
 use crate::context::build_context;
 use crate::executor::execute_tool;
 
-/// Maximum number of tool-use rounds before forcing a text reply.
-const MAX_TOOL_ROUNDS: usize = 10;
-
 /// Maximum characters per tool output (roughly ~8K tokens).
 const MAX_TOOL_OUTPUT_CHARS: usize = 30_000;
 
@@ -31,6 +28,7 @@ pub struct AgentRuntime {
     system_prompt: Option<String>,
     max_turns: usize,
     max_context_tokens: usize,
+    max_tool_rounds: usize,
 }
 
 impl AgentRuntime {
@@ -50,6 +48,7 @@ impl AgentRuntime {
             system_prompt,
             max_turns: 6,
             max_context_tokens: 30_000,
+            max_tool_rounds: 25,
         }
     }
 
@@ -62,6 +61,7 @@ impl AgentRuntime {
         system_prompt: Option<String>,
         max_turns: usize,
         max_context_tokens: usize,
+        max_tool_rounds: usize,
     ) -> Self {
         Self {
             provider,
@@ -71,6 +71,7 @@ impl AgentRuntime {
             system_prompt,
             max_turns,
             max_context_tokens,
+            max_tool_rounds,
         }
     }
 
@@ -136,8 +137,8 @@ impl AgentRuntime {
         let mut rounds = 0;
         loop {
             rounds += 1;
-            if rounds > MAX_TOOL_ROUNDS {
-                warn!("Exceeded maximum tool rounds ({}), forcing text reply", MAX_TOOL_ROUNDS);
+            if rounds > self.max_tool_rounds {
+                warn!("Exceeded maximum tool rounds ({}), forcing text reply", self.max_tool_rounds);
                 break;
             }
 

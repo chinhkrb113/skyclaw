@@ -291,6 +291,9 @@ pub struct AgentConfig {
     /// Maximum estimated token count for the entire context window.
     #[serde(default = "default_max_context_tokens")]
     pub max_context_tokens: usize,
+    /// Maximum number of tool-use rounds per message before forcing a text reply.
+    #[serde(default = "default_max_tool_rounds")]
+    pub max_tool_rounds: usize,
 }
 
 impl Default for AgentConfig {
@@ -298,12 +301,14 @@ impl Default for AgentConfig {
         Self {
             max_turns: 6,
             max_context_tokens: 30_000,
+            max_tool_rounds: 25,
         }
     }
 }
 
 fn default_max_turns() -> usize { 6 }
 fn default_max_context_tokens() -> usize { 30_000 }
+fn default_max_tool_rounds() -> usize { 25 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolsConfig {
