@@ -164,4 +164,115 @@ mod tests {
         let result = read_file_for_sending(Path::new("/tmp/nonexistent_file_12345.txt")).await;
         assert!(result.is_err());
     }
+
+    // ── T5b: New edge case tests ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn save_zero_byte_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path();
+
+        let file = ReceivedFile {
+            name: "empty.txt".to_string(),
+            mime_type: "text/plain".to_string(),
+            size: 0,
+            data: Bytes::new(),
+        };
+
+        let saved_path = save_received_file(&file, workspace).await.unwrap();
+        assert!(saved_path.exists());
+        let content = tokio::fs::read(&saved_path).await.unwrap();
+        assert!(content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn save_file_with_unicode_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path();
+
+        let file = ReceivedFile {
+            name: "\u{6D4B}\u{8BD5}\u{6587}\u{4EF6}.txt".to_string(),
+            mime_type: "text/plain".to_string(),
+            size: 5,
+            data: Bytes::from("hello"),
+        };
+
+        let saved_path = save_received_file(&file, workspace).await.unwrap();
+        assert!(saved_path.exists());
+        let content = tokio::fs::read_to_string(&saved_path).await.unwrap();
+        assert_eq!(content, "hello");
+    }
+
+    #[tokio::test]
+    async fn save_duplicate_file_overwrites() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path();
+
+        let file1 = ReceivedFile {
+            name: "dup.txt".to_string(),
+            mime_type: "text/plain".to_string(),
+            size: 6,
+            data: Bytes::from("first!"),
+        };
+        save_received_file(&file1, workspace).await.unwrap();
+
+        let file2 = ReceivedFile {
+            name: "dup.txt".to_string(),
+            mime_type: "text/plain".to_string(),
+            size: 7,
+            data: Bytes::from("second!"),
+        };
+        let saved_path = save_received_file(&file2, workspace).await.unwrap();
+
+        let content = tokio::fs::read_to_string(&saved_path).await.unwrap();
+        assert_eq!(content, "second!");
+    }
+
+    #[tokio::test]
+    async fn save_file_strips_backslash_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path();
+
+        // Backslash-based path traversal
+        let file = ReceivedFile {
+            name: "..\\..\\etc\\shadow".to_string(),
+            mime_type: "text/plain".to_string(),
+            size: 4,
+            data: Bytes::from("test"),
+        };
+
+        let saved_path = save_received_file(&file, workspace).await.unwrap();
+        assert!(saved_path.starts_with(workspace));
+    }
+
+    #[tokio::test]
+    async fn read_file_for_sending_zero_byte() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file_path = tmp.path().join("empty.txt");
+        tokio::fs::write(&file_path, b"").await.unwrap();
+
+        let outbound = read_file_for_sending(&file_path).await.unwrap();
+        assert_eq!(outbound.name, "empty.txt");
+        match outbound.data {
+            FileData::Bytes(b) => assert!(b.is_empty()),
+            _ => panic!("expected Bytes"),
+        }
+    }
+
+    #[test]
+    fn mime_detection_all_extensions() {
+        // Cover all branches of mime_from_extension
+        assert_eq!(mime_from_extension(Path::new("f.md")), "text/markdown");
+        assert_eq!(mime_from_extension(Path::new("f.toml")), "application/toml");
+        assert_eq!(mime_from_extension(Path::new("f.py")), "text/x-python");
+        assert_eq!(mime_from_extension(Path::new("f.js")), "text/javascript");
+        assert_eq!(mime_from_extension(Path::new("f.ts")), "text/typescript");
+        assert_eq!(mime_from_extension(Path::new("f.html")), "text/html");
+        assert_eq!(mime_from_extension(Path::new("f.htm")), "text/html");
+        assert_eq!(mime_from_extension(Path::new("f.css")), "text/css");
+        assert_eq!(mime_from_extension(Path::new("f.gif")), "image/gif");
+        assert_eq!(mime_from_extension(Path::new("f.zip")), "application/zip");
+        assert_eq!(mime_from_extension(Path::new("f.tar")), "application/x-tar");
+        assert_eq!(mime_from_extension(Path::new("f.gz")), "application/gzip");
+    }
 }

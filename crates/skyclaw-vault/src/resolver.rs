@@ -104,4 +104,41 @@ mod tests {
         assert!(is_vault_uri("vault://skyclaw/key"));
         assert!(!is_vault_uri("http://example.com"));
     }
+
+    // ── T5b: New edge case tests ──────────────────────────────────────
+
+    #[test]
+    fn parse_nested_key_path() {
+        let uri = parse_vault_uri("vault://skyclaw/providers/anthropic/api_key").unwrap();
+        assert_eq!(uri.key, "providers/anthropic/api_key");
+    }
+
+    #[test]
+    fn is_vault_uri_empty_string() {
+        assert!(!is_vault_uri(""));
+    }
+
+    #[test]
+    fn is_vault_uri_partial_scheme() {
+        assert!(!is_vault_uri("vault:/"));
+        assert!(!is_vault_uri("vault:"));
+    }
+
+    #[test]
+    fn reject_vault_uri_no_slash_after_authority() {
+        // "vault://skyclaw" has no trailing slash or key
+        assert!(parse_vault_uri("vault://skyclaw").is_err());
+    }
+
+    #[test]
+    fn parse_vault_uri_with_special_chars_in_key() {
+        let uri = parse_vault_uri("vault://skyclaw/key-with_special.chars").unwrap();
+        assert_eq!(uri.key, "key-with_special.chars");
+    }
+
+    #[test]
+    fn is_vault_uri_case_sensitive() {
+        // "Vault://" with capital V should not match
+        assert!(!is_vault_uri("Vault://skyclaw/key"));
+    }
 }

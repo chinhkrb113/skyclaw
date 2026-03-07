@@ -381,4 +381,112 @@ mod tests {
         // by asserting the expected return value is "sqlite"
         assert_eq!(entry_type_to_str(&MemoryEntryType::Conversation), "conversation");
     }
+
+    // ── T5b: New edge case tests ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn empty_database_search_returns_empty() {
+        let mem = SqliteMemory::new("sqlite::memory:").await.unwrap();
+        let results = mem.search("anything", SearchOpts::default()).await.unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn empty_database_list_sessions_returns_empty() {
+        let mem = SqliteMemory::new("sqlite::memory:").await.unwrap();
+        let sessions = mem.list_sessions().await.unwrap();
+        assert!(sessions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_nonexistent_does_not_error() {
+        let mem = SqliteMemory::new("sqlite::memory:").await.unwrap();
+        let result = mem.delete("nonexistent_id").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn search_special_characters() {
+        let mem = SqliteMemory::new("sqlite::memory:").await.unwrap();
+        mem.store(make_entry("sp1", "error: file.rs:42 panicked", None)).await.unwrap();
+        mem.store(make_entry("sp2", "normal content", None)).await.unwrap();
+
+        // Test with SQL special chars (% and _)
+        let results = mem.search("file.rs", SearchOpts::default()).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "sp1");
+    }
+
+    #[tokio::test]
+    async fn search_empty_query_matches_all() {
+        let mem = SqliteMemory::new("sqlite::memory:").await.unwrap();
+        mem.store(make_entry("eq1", "first", None)).await.unwrap();
+        mem.store(make_entry("eq2", "second", None)).await.unwrap();
+
+        let results = mem.search("", SearchOpts::default()).await.unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn unicode_content_round_trip() {
+        let mem = SqliteMemory::new("sqlite::memory:").await.unwrap();
+        let unicode_content = "\u{1F600} Hello \u{4E16}\u{754C} \u{041F}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}";
+        mem.store(make_entry("uc1", unicode_content, None)).await.unwrap();
+
+        let fetched = mem.get("uc1").await.unwrap().unwrap();
+        assert_eq!(fetched.content, unicode_content);
+    }
+
+    #[tokio::test]
+    async fn large_content_entry() {
+        let mem = SqliteMemory::new("sqlite::memory:").await.unwrap();
+        let large_content = "x".repeat(100_000); // 100KB content
+        mem.store(make_entry("lg1", &large_content, None)).await.unwrap();
+
+        let fetched = mem.get("lg1").await.unwrap().unwrap();
+        assert_eq!(fetched.content.len(), 100_000);
+    }
+
+    #[tokio::test]
+    async fn search_with_entry_type_filter() {
+        let mem = SqliteMemory::new("sqlite::memory:").await.unwrap();
+
+        let mut e1 = make_entry("tf1", "hello from conversation", None);
+        e1.entry_type = MemoryEntryType::Conversation;
+        mem.store(e1).await.unwrap();
+
+        let mut e2 = make_entry("tf2", "hello from long term", None);
+        e2.entry_type = MemoryEntryType::LongTerm;
+        mem.store(e2).await.unwrap();
+
+        let opts = SearchOpts {
+            entry_type_filter: Some(MemoryEntryType::LongTerm),
+            ..Default::default()
+        };
+        let results = mem.search("hello", opts).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "tf2");
+    }
+
+    #[tokio::test]
+    async fn session_history_empty_session() {
+        let mem = SqliteMemory::new("sqlite::memory:").await.unwrap();
+        let history = mem.get_session_history("nonexistent_session", 10).await.unwrap();
+        assert!(history.is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_limit_respected() {
+        let mem = SqliteMemory::new("sqlite::memory:").await.unwrap();
+        for i in 0..10 {
+            mem.store(make_entry(&format!("lim{i}"), &format!("hello entry {i}"), None)).await.unwrap();
+        }
+
+        let opts = SearchOpts {
+            limit: 3,
+            ..Default::default()
+        };
+        let results = mem.search("hello", opts).await.unwrap();
+        assert_eq!(results.len(), 3);
+    }
 }

@@ -1,0 +1,26 @@
+{
+  "task": "T6d",
+  "skill": "code-reviewer",
+  "status": "complete",
+  "artifacts": [
+    "Claude-Production-Grade-Suite/code-reviewer/deep-review.md"
+  ],
+  "metrics": {
+    "files_reviewed": 54,
+    "lines_reviewed": 7236,
+    "findings_total": 21,
+    "critical": 0,
+    "high": 3,
+    "medium": 7,
+    "low": 8,
+    "info": 3,
+    "quality_score": 7.5,
+    "wave_a_findings_reverified": 13,
+    "new_findings": 8
+  },
+  "effort": {
+    "files_read": 58,
+    "files_written": 2,
+    "tool_calls": 32
+  }
+}

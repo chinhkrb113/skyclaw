@@ -23,4 +23,44 @@ mod tests {
         assert_eq!(expand_env_vars("${NONEXISTENT_VAR}"), "");
         std::env::remove_var("TEST_SKYCLAW_VAR");
     }
+
+    // ── T5b: New edge case tests ──────────────────────────────────────
+
+    #[test]
+    fn test_missing_env_var_expands_to_empty() {
+        let result = expand_env_vars("key=${THIS_VAR_DOES_NOT_EXIST_99999}");
+        assert_eq!(result, "key=");
+    }
+
+    #[test]
+    fn test_multiple_vars_in_one_string() {
+        std::env::set_var("SKYCLAW_A", "alpha");
+        std::env::set_var("SKYCLAW_B", "beta");
+        let result = expand_env_vars("${SKYCLAW_A}:${SKYCLAW_B}");
+        assert_eq!(result, "alpha:beta");
+        std::env::remove_var("SKYCLAW_A");
+        std::env::remove_var("SKYCLAW_B");
+    }
+
+    #[test]
+    fn test_empty_input() {
+        assert_eq!(expand_env_vars(""), "");
+    }
+
+    #[test]
+    fn test_dollar_without_braces_not_expanded() {
+        assert_eq!(expand_env_vars("$FOO"), "$FOO");
+    }
+
+    #[test]
+    fn test_nested_braces_not_recursive() {
+        // ${${INNER}} is not supported; the regex just finds ${${INNER}
+        // and tries it as a var name, which won't match.
+        std::env::set_var("SKYCLAW_INNER", "value");
+        let result = expand_env_vars("${${SKYCLAW_INNER}}");
+        // The regex matches ${${SKYCLAW_INNER} with var name "${SKYCLAW_INNER"
+        // which doesn't exist, so it expands to "" followed by the trailing "}"
+        assert_eq!(result, "}");
+        std::env::remove_var("SKYCLAW_INNER");
+    }
 }

@@ -210,4 +210,97 @@ mod tests {
         let creds = detect_credentials(input);
         assert!(creds.is_empty());
     }
+
+    // ── T5b: New edge case / security tests ────────────────────────────
+
+    #[test]
+    fn empty_input_returns_empty() {
+        let creds = detect_credentials("");
+        assert!(creds.is_empty());
+    }
+
+    #[test]
+    fn short_tokens_not_detected() {
+        // Tokens shorter than 20 chars after prefix should not be detected
+        let input = "sk-short";
+        let creds = detect_credentials(input);
+        assert!(creds.is_empty());
+    }
+
+    #[test]
+    fn no_false_positive_on_url() {
+        let input = "Visit https://example.com/path?q=value for more info";
+        let creds = detect_credentials(input);
+        assert!(creds.is_empty());
+    }
+
+    #[test]
+    fn no_false_positive_on_code_snippet() {
+        let input = r#"let x = "hello_world"; println!("{}", x);"#;
+        let creds = detect_credentials(input);
+        assert!(creds.is_empty());
+    }
+
+    #[test]
+    fn multiple_credentials_in_same_text() {
+        let input = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAA and gsk_BBBBBBBBBBBBBBBBBBBBBB";
+        let creds = detect_credentials(input);
+        assert_eq!(creds.len(), 2);
+        let providers: Vec<&str> = creds.iter().map(|c| c.provider.as_str()).collect();
+        assert!(providers.contains(&"anthropic"));
+        assert!(providers.contains(&"groq"));
+    }
+
+    #[test]
+    fn duplicate_value_deduplication() {
+        // Same token appearing twice should only be detected once
+        let input = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAA and sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAA";
+        let creds = detect_credentials(input);
+        assert_eq!(creds.len(), 1);
+    }
+
+    #[test]
+    fn generic_api_key_with_quotes() {
+        let input = r#"api_key = 'my_super_long_secret_123'"#;
+        let creds = detect_credentials(input);
+        assert!(!creds.is_empty());
+    }
+
+    #[test]
+    fn generic_token_detected() {
+        let input = r#"token = "abcdefghijklmnopqrstuv""#;
+        let creds = detect_credentials(input);
+        assert!(!creds.is_empty());
+    }
+
+    #[test]
+    fn generic_secret_detected() {
+        let input = r#"secret="my_super_duper_secret_value""#;
+        let creds = detect_credentials(input);
+        assert!(!creds.is_empty());
+    }
+
+    #[test]
+    fn anthropic_key_not_matched_as_openai() {
+        // The Anthropic pattern runs first; the OpenAI `sk-*` pattern should
+        // not emit a duplicate because seen_values deduplication kicks in.
+        let input = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAA";
+        let creds = detect_credentials(input);
+        assert_eq!(creds.len(), 1);
+        assert_eq!(creds[0].provider, "anthropic");
+    }
+
+    #[test]
+    fn unicode_text_no_crash() {
+        let input = "This is Unicode: \u{1F600}\u{1F601} and no secrets \u{2764}";
+        let creds = detect_credentials(input);
+        assert!(creds.is_empty());
+    }
+
+    #[test]
+    fn multiline_input() {
+        let input = "line 1\napi_key=abcdefghijklmnop\nline 3";
+        let creds = detect_credentials(input);
+        assert!(!creds.is_empty());
+    }
 }

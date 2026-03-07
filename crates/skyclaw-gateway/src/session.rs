@@ -169,4 +169,64 @@ mod tests {
         assert_eq!(k1, k2);
         assert_eq!(k1, "telegram:123:456");
     }
+
+    // ── T5b: New edge case tests ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn concurrent_session_creation() {
+        let mgr = std::sync::Arc::new(SessionManager::new());
+        let mut handles = Vec::new();
+
+        for i in 0..10 {
+            let m = mgr.clone();
+            handles.push(tokio::spawn(async move {
+                m.get_or_create_session("cli", &format!("chat{i}"), "user").await
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        assert_eq!(mgr.session_count().await, 10);
+    }
+
+    #[tokio::test]
+    async fn remove_nonexistent_session_is_noop() {
+        let mgr = SessionManager::new();
+        mgr.remove_session("missing", "c", "u").await;
+        assert_eq!(mgr.session_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn default_session_manager_empty() {
+        let mgr = SessionManager::default();
+        assert_eq!(mgr.session_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn session_key_with_special_characters() {
+        let mgr = SessionManager::new();
+        let session = mgr.get_or_create_session("tg", "chat:with:colons", "user@domain").await;
+        assert_eq!(session.session_id, "tg:chat:with:colons:user@domain");
+    }
+
+    #[tokio::test]
+    async fn update_nonexistent_session_creates_it() {
+        let mgr = SessionManager::new();
+
+        let session = SessionContext {
+            session_id: "new".to_string(),
+            channel: "cli".to_string(),
+            chat_id: "c1".to_string(),
+            user_id: "u1".to_string(),
+            history: Vec::new(),
+            workspace_path: std::path::PathBuf::from("/tmp"),
+        };
+
+        mgr.update_session(session).await;
+        // The session_key function builds key from channel+chat_id+user_id
+        let count = mgr.session_count().await;
+        assert_eq!(count, 1);
+    }
 }

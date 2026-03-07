@@ -123,4 +123,92 @@ mod tests {
         let results = hybrid_search("", &entries, 0.0, 1.0);
         assert_eq!(results.len(), 2);
     }
+
+    // ── T5b: New edge case tests ──────────────────────────────────────
+
+    #[test]
+    fn test_no_entries_returns_empty() {
+        let entries: Vec<MemoryEntry> = Vec::new();
+        let results = hybrid_search("anything", &entries, 0.0, 1.0);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_query_with_no_matches() {
+        let entries = vec![
+            make_entry("1", "Rust programming"),
+            make_entry("2", "Python scripting"),
+        ];
+        let results = hybrid_search("JavaScript", &entries, 0.0, 1.0);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_keyword_weight_zero_returns_empty() {
+        let entries = vec![make_entry("1", "hello world")];
+        let results = hybrid_search("hello", &entries, 0.0, 0.0);
+        // Score = score * 0.0 = 0.0, so nothing passes the >0 filter
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_single_char_query_treated_as_empty() {
+        // Tokenizer filters out tokens with length <= 1, so a single-char
+        // query results in empty query_terms, which returns ALL entries.
+        let entries = vec![make_entry("1", "a b c hello world")];
+        let results = hybrid_search("a", &entries, 0.0, 1.0);
+        // "a" is filtered out -> empty query -> returns all entries
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_case_insensitive_search() {
+        let entries = vec![
+            make_entry("1", "Rust is GREAT"),
+            make_entry("2", "python is ok"),
+        ];
+        let results = hybrid_search("rust", &entries, 0.0, 1.0);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "1");
+    }
+
+    #[test]
+    fn test_special_characters_in_query() {
+        let entries = vec![
+            make_entry("1", "error in file.rs: unwrap() failed"),
+            make_entry("2", "normal content here"),
+        ];
+        // Special chars like . : () are word separators in the tokenizer
+        let results = hybrid_search("file.rs", &entries, 0.0, 1.0);
+        // "file" and "rs" are tokens, should match entry 1
+        assert!(!results.is_empty());
+        assert_eq!(results[0].id, "1");
+    }
+
+    #[test]
+    fn test_search_with_high_keyword_weight() {
+        let entries = vec![
+            make_entry("1", "The quick brown fox jumps"),
+            make_entry("2", "fox fox fox fox fox fox fox"),
+        ];
+        // Entry 2 has higher TF for "fox" and should score higher
+        let results = hybrid_search("fox", &entries, 0.0, 2.0);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].id, "2");
+    }
+
+    #[test]
+    #[ignore] // Performance test: may take >1s on slow hardware
+    fn test_search_1000_entries_performance() {
+        let entries: Vec<MemoryEntry> = (0..1000)
+            .map(|i| make_entry(&format!("e{i}"), &format!("Entry number {i} with some content about Rust and programming")))
+            .collect();
+
+        let start = std::time::Instant::now();
+        let results = hybrid_search("Rust programming", &entries, 0.0, 1.0);
+        let elapsed = start.elapsed();
+
+        assert!(!results.is_empty());
+        assert!(elapsed.as_millis() < 50, "Search took {}ms, expected <50ms", elapsed.as_millis());
+    }
 }

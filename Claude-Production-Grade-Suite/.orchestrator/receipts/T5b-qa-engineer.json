@@ -1,0 +1,67 @@
+{
+  "task": "T5b",
+  "skill": "qa-engineer",
+  "status": "complete",
+  "artifacts": [
+    "crates/skyclaw-agent/tests/runtime_integration.rs",
+    "crates/skyclaw-gateway/tests/health_integration.rs",
+    "crates/skyclaw-memory/tests/memory_integration.rs",
+    "crates/skyclaw-vault/tests/vault_integration.rs",
+    "crates/skyclaw-vault/src/local.rs",
+    "crates/skyclaw-vault/src/detector.rs",
+    "crates/skyclaw-vault/src/resolver.rs",
+    "crates/skyclaw-memory/src/search.rs",
+    "crates/skyclaw-memory/src/sqlite.rs",
+    "crates/skyclaw-channels/src/file_transfer.rs",
+    "crates/skyclaw-core/src/config/env.rs",
+    "crates/skyclaw-core/src/config/loader.rs",
+    "crates/skyclaw-agent/src/executor.rs",
+    "crates/skyclaw-gateway/src/session.rs",
+    "crates/skyclaw-gateway/Cargo.toml"
+  ],
+  "metrics": {
+    "tests_added": 105,
+    "tests_total": 217,
+    "tests_passing": 215,
+    "tests_ignored": 2,
+    "tests_failed": 0,
+    "bugs_found": 0
+  },
+  "test_breakdown": {
+    "vault_local_edge_cases": 14,
+    "vault_detector_edge_cases": 11,
+    "vault_resolver_edge_cases": 6,
+    "vault_integration": 8,
+    "memory_search_edge_cases": 8,
+    "memory_sqlite_edge_cases": 9,
+    "memory_integration": 7,
+    "channels_file_transfer_edge_cases": 6,
+    "config_env_edge_cases": 5,
+    "config_loader_edge_cases": 7,
+    "agent_executor_sandbox_security": 7,
+    "agent_runtime_integration": 7,
+    "gateway_session_edge_cases": 5,
+    "gateway_health_integration": 2,
+    "performance_tests_ignored": 2
+  },
+  "coverage_areas": [
+    "Integration: Agent runtime with mock provider and mock memory (end-to-end agent loop)",
+    "Integration: Gateway health endpoint (axum server + HTTP request via tower::oneshot)",
+    "Integration: Memory backend factory + full CRUD lifecycle (SQLite and Markdown)",
+    "Integration: Vault persistence across instances + resolver integration",
+    "Edge case: Vault concurrent reads, empty vault, corrupt file recovery, binary data, empty plaintext",
+    "Edge case: Memory empty database search, special characters, unicode, large entries, limit enforcement",
+    "Edge case: File transfer zero-byte files, unicode names, duplicate files, backslash traversal",
+    "Edge case: Config missing env vars, partial overrides, security settings, tunnel, observability",
+    "Security: Sandbox double-dot traversal, absolute root path, mixed valid/invalid paths",
+    "Security: Credential detector false positive avoidance, deduplication, multiline, unicode safety",
+    "Security: Vault URI case sensitivity, partial scheme, special chars in keys",
+    "Performance: Memory search over 1000 entries (ignored, <50ms gate)",
+    "Performance: Config parsing 100 iterations (ignored, <10ms per parse gate)"
+  ],
+  "effort": {
+    "files_read": 35,
+    "files_written": 15,
+    "tool_calls": 52
+  }
+}

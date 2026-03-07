@@ -235,4 +235,175 @@ mod tests {
         let result = validate_sandbox(&tool, &session);
         assert!(result.is_ok());
     }
+
+    // ── T5b: New sandbox security & edge case tests ───────────────────
+
+    #[test]
+    fn sandbox_rejects_double_dot_encoded_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+
+        // Path with encoded-style traversal (literal string, not URL-encoded)
+        let tool = MockTool::new("encoded_traversal")
+            .with_declarations(ToolDeclarations {
+                file_access: vec![PathAccess::Read("../../../etc/passwd".to_string())],
+                network_access: Vec::new(),
+                shell_access: false,
+            });
+
+        let session = SessionContext {
+            session_id: "test".to_string(),
+            channel: "cli".to_string(),
+            chat_id: "c".to_string(),
+            user_id: "u".to_string(),
+            history: Vec::new(),
+            workspace_path: workspace,
+        };
+
+        let result = validate_sandbox(&tool, &session);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn sandbox_rejects_absolute_path_to_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+
+        let tool = MockTool::new("root_access")
+            .with_declarations(ToolDeclarations {
+                file_access: vec![PathAccess::ReadWrite("/".to_string())],
+                network_access: Vec::new(),
+                shell_access: false,
+            });
+
+        let session = SessionContext {
+            session_id: "test".to_string(),
+            channel: "cli".to_string(),
+            chat_id: "c".to_string(),
+            user_id: "u".to_string(),
+            history: Vec::new(),
+            workspace_path: workspace,
+        };
+
+        let result = validate_sandbox(&tool, &session);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn sandbox_allows_nested_workspace_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().to_path_buf();
+        let nested = workspace.join("src").join("lib");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        let tool = MockTool::new("nested_tool")
+            .with_declarations(ToolDeclarations {
+                file_access: vec![PathAccess::Read("src/lib".to_string())],
+                network_access: Vec::new(),
+                shell_access: false,
+            });
+
+        let session = SessionContext {
+            session_id: "test".to_string(),
+            channel: "cli".to_string(),
+            chat_id: "c".to_string(),
+            user_id: "u".to_string(),
+            history: Vec::new(),
+            workspace_path: workspace,
+        };
+
+        let result = validate_sandbox(&tool, &session);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn sandbox_multiple_file_accesses_all_valid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().to_path_buf();
+        std::fs::create_dir_all(workspace.join("src")).unwrap();
+        std::fs::create_dir_all(workspace.join("docs")).unwrap();
+
+        let tool = MockTool::new("multi_tool")
+            .with_declarations(ToolDeclarations {
+                file_access: vec![
+                    PathAccess::Read("src".to_string()),
+                    PathAccess::Write("docs".to_string()),
+                ],
+                network_access: Vec::new(),
+                shell_access: false,
+            });
+
+        let session = SessionContext {
+            session_id: "test".to_string(),
+            channel: "cli".to_string(),
+            chat_id: "c".to_string(),
+            user_id: "u".to_string(),
+            history: Vec::new(),
+            workspace_path: workspace,
+        };
+
+        let result = validate_sandbox(&tool, &session);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn sandbox_one_bad_path_among_multiple_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().join("workspace");
+        std::fs::create_dir_all(workspace.join("valid")).unwrap();
+
+        let tool = MockTool::new("mixed_tool")
+            .with_declarations(ToolDeclarations {
+                file_access: vec![
+                    PathAccess::Read("valid".to_string()),
+                    PathAccess::Write("/etc/shadow".to_string()),
+                ],
+                network_access: Vec::new(),
+                shell_access: false,
+            });
+
+        let session = SessionContext {
+            session_id: "test".to_string(),
+            channel: "cli".to_string(),
+            chat_id: "c".to_string(),
+            user_id: "u".to_string(),
+            history: Vec::new(),
+            workspace_path: workspace,
+        };
+
+        let result = validate_sandbox(&tool, &session);
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn execute_tool_with_custom_output() {
+        let tool = MockTool::new("custom")
+            .with_output(ToolOutput {
+                content: "custom result".to_string(),
+                is_error: false,
+            });
+        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(tool)];
+        let session = make_session();
+
+        let result = execute_tool("custom", serde_json::json!({}), &tools, &session).await.unwrap();
+        assert_eq!(result.content, "custom result");
+        assert!(!result.is_error);
+    }
+
+    #[tokio::test]
+    async fn execute_tool_error_output() {
+        let tool = MockTool::new("err_tool")
+            .with_output(ToolOutput {
+                content: "something went wrong".to_string(),
+                is_error: true,
+            });
+        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(tool)];
+        let session = make_session();
+
+        let result = execute_tool("err_tool", serde_json::json!({}), &tools, &session).await.unwrap();
+        assert!(result.is_error);
+        assert_eq!(result.content, "something went wrong");
+    }
 }

@@ -201,4 +201,138 @@ enabled = false
         let dc = &config.channel["discord"];
         assert!(!dc.enabled);
     }
+
+    // ── T5b: New edge case tests ──────────────────────────────────────
+
+    #[test]
+    fn test_empty_config_file_returns_defaults() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), "").unwrap();
+
+        let config = load_config(Some(tmp.path())).unwrap();
+        // Empty file should produce default config
+        assert_eq!(config.gateway.host, "127.0.0.1");
+        assert_eq!(config.gateway.port, 8080);
+    }
+
+    #[test]
+    fn test_config_with_security_settings() {
+        let toml_content = r#"
+[security]
+sandbox = "permissive"
+file_scanning = false
+skill_signing = "optional"
+audit_log = false
+
+[security.rate_limit]
+requests_per_minute = 100
+"#;
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), toml_content).unwrap();
+
+        let config = load_config(Some(tmp.path())).unwrap();
+        assert_eq!(config.security.sandbox, "permissive");
+        assert!(!config.security.file_scanning);
+        assert_eq!(config.security.skill_signing, "optional");
+        assert!(!config.security.audit_log);
+        assert!(config.security.rate_limit.is_some());
+        assert_eq!(config.security.rate_limit.unwrap().requests_per_minute, 100);
+    }
+
+    #[test]
+    fn test_config_partial_overrides_keep_defaults() {
+        let toml_content = r#"
+[gateway]
+port = 3000
+"#;
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), toml_content).unwrap();
+
+        let config = load_config(Some(tmp.path())).unwrap();
+        assert_eq!(config.gateway.port, 3000);
+        // Host should still be default
+        assert_eq!(config.gateway.host, "127.0.0.1");
+        // Other sections should be defaults
+        assert_eq!(config.memory.backend, "sqlite");
+        assert_eq!(config.vault.backend, "local-chacha20");
+    }
+
+    #[test]
+    fn test_env_var_expansion_missing_var() {
+        let toml_content = r#"
+[provider]
+name = "anthropic"
+api_key = "${NONEXISTENT_SKYCLAW_VAR_99999}"
+"#;
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), toml_content).unwrap();
+
+        let config = load_config(Some(tmp.path())).unwrap();
+        // Missing env var expands to empty string
+        assert_eq!(config.provider.api_key.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn test_config_with_tunnel() {
+        let toml_content = r#"
+[tunnel]
+provider = "cloudflare"
+token = "cf-token-123"
+"#;
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), toml_content).unwrap();
+
+        let config = load_config(Some(tmp.path())).unwrap();
+        assert!(config.tunnel.is_some());
+        let tunnel = config.tunnel.unwrap();
+        assert_eq!(tunnel.provider, "cloudflare");
+        assert_eq!(tunnel.token.as_deref(), Some("cf-token-123"));
+    }
+
+    #[test]
+    fn test_config_observability() {
+        let toml_content = r#"
+[observability]
+log_level = "debug"
+otel_enabled = true
+otel_endpoint = "http://localhost:4317"
+"#;
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), toml_content).unwrap();
+
+        let config = load_config(Some(tmp.path())).unwrap();
+        assert_eq!(config.observability.log_level, "debug");
+        assert!(config.observability.otel_enabled);
+        assert_eq!(config.observability.otel_endpoint.as_deref(), Some("http://localhost:4317"));
+    }
+
+    #[test]
+    #[ignore] // Performance test
+    fn test_config_parsing_performance() {
+        let toml_content = r#"
+[gateway]
+host = "0.0.0.0"
+port = 8080
+
+[provider]
+name = "anthropic"
+api_key = "sk-test"
+
+[memory]
+backend = "sqlite"
+
+[security]
+sandbox = "mandatory"
+"#;
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), toml_content).unwrap();
+
+        let start = std::time::Instant::now();
+        for _ in 0..100 {
+            let _ = load_config(Some(tmp.path())).unwrap();
+        }
+        let elapsed = start.elapsed();
+        let per_parse = elapsed / 100;
+        assert!(per_parse.as_millis() < 10, "Config parse took {}ms, expected <10ms", per_parse.as_millis());
+    }
 }

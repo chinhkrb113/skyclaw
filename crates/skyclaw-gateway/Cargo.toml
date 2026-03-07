@@ -22,3 +22,5 @@ chrono.workspace = true
 
 [dev-dependencies]
 skyclaw-test-utils.workspace = true
+tokio = { workspace = true, features = ["full", "test-util"] }
+tower = { workspace = true, features = ["util"] }
