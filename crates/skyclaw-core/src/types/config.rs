@@ -372,8 +372,8 @@ pub struct AgentConfig {
     pub max_spend_usd: f64,
     /// Enable v2 agentic core optimizations: complexity classification,
     /// prompt stratification, structured failures, trivial fast-path.
-    /// Default: false (v1 behavior preserved).
-    #[serde(default)]
+    /// Default: true (v2 behavior). Set to false to revert to v1 behavior.
+    #[serde(default = "default_v2_optimizations")]
     pub v2_optimizations: bool,
 }
 
@@ -388,7 +388,7 @@ impl Default for AgentConfig {
             streaming_flush_interval_ms: 1000,
             streaming_tool_updates: true,
             max_spend_usd: 0.0,
-            v2_optimizations: false,
+            v2_optimizations: true,
         }
     }
 }
@@ -410,6 +410,10 @@ fn default_streaming_flush_interval_ms() -> u64 {
 }
 fn default_max_spend_usd() -> f64 {
     0.0
+}
+
+fn default_v2_optimizations() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

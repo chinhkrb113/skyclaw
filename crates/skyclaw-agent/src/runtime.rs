@@ -94,7 +94,7 @@ impl AgentRuntime {
             task_queue: None,
             budget: BudgetTracker::new(0.0),
             model_pricing,
-            v2_optimizations: false,
+            v2_optimizations: true,
         }
     }
 
@@ -129,7 +129,7 @@ impl AgentRuntime {
             task_queue: None,
             budget: BudgetTracker::new(max_spend_usd),
             model_pricing,
-            v2_optimizations: false,
+            v2_optimizations: true,
         }
     }
 

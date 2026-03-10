@@ -25,93 +25,599 @@ const READ_ONLY_TOOLS: &[&str] = &[
 ];
 
 /// Keywords in task descriptions that indicate a complex task.
+/// Multilingual: EN, VI, ZH (Simplified + Traditional), JA, KO, ES, FR, PT, DE,
+/// RU, AR, HI, TH, ID/MS, TR, PL, NL, IT, UK, SV
 const COMPLEX_KEYWORDS: &[&str] = &[
-    "architecture",
-    "architect",
-    "debug",
-    "debugging",
-    "refactor",
-    "refactoring",
-    "design",
-    "redesign",
-    "migrate",
-    "migration",
-    "optimize",
-    "optimization",
-    "security audit",
-    "performance",
-    "investigate",
-    "root cause",
-    "rewrite",
+    // English (exhaustive — formal, informal, abbreviations)
+    "architecture", "architect", "debug", "debugging", "debugger", "refactor",
+    "refactoring", "design", "redesign", "migrate", "migration", "optimize",
+    "optimization", "optimise", "optimisation", "security audit", "performance",
+    "investigate", "root cause", "rewrite", "rearchitect", "overhaul", "revamp",
+    "deep dive", "postmortem", "post-mortem", "incident", "outage", "scalability",
+    "scale", "bottleneck", "profiling", "benchmark", "load test", "stress test",
+    "threat model", "vulnerability", "penetration test", "pentest", "code review",
+    "tech debt", "technical debt", "system design", "capacity planning",
+    "disaster recovery", "fault tolerance", "high availability",
+    // Vietnamese (formal + informal + slang)
+    "kiến trúc", "gỡ lỗi", "tái cấu trúc", "thiết kế", "thiết kế lại",
+    "di chuyển", "di cư", "tối ưu", "tối ưu hóa", "kiểm tra bảo mật",
+    "hiệu suất", "điều tra", "nguyên nhân gốc", "viết lại", "sửa lỗi",
+    "phân tích lỗi", "xem xét mã", "nợ kỹ thuật", "kiểm thử tải",
+    "kiểm thử áp lực", "khắc phục sự cố", "tìm lỗi", "phân tích hiệu suất",
+    "cải thiện hiệu năng", "đánh giá bảo mật", "mô hình hóa mối đe dọa",
+    "lỗ hổng", "xử lý sự cố", "khả năng mở rộng", "chịu lỗi",
+    // Chinese (Simplified)
+    "架构", "调试", "重构", "设计", "重新设计", "迁移", "优化", "安全审计",
+    "性能", "调查", "根因", "根本原因", "重写", "代码审查", "技术债务",
+    "压力测试", "负载测试", "性能分析", "瓶颈", "故障排除", "漏洞",
+    "渗透测试", "容灾", "高可用", "扩展性", "可伸缩",
+    // Chinese (Traditional)
+    "架構", "調試", "重構", "設計", "遷移", "優化", "安全審計", "效能",
+    "調查", "根因", "重寫", "程式碼審查", "技術債務", "壓力測試",
+    "負載測試", "效能分析", "瓶頸", "故障排除", "漏洞", "滲透測試",
+    // Japanese
+    "アーキテクチャ", "デバッグ", "リファクタリング", "設計", "再設計",
+    "移行", "最適化", "セキュリティ監査", "パフォーマンス", "調査",
+    "根本原因", "書き直し", "コードレビュー", "技術的負債", "負荷テスト",
+    "ストレステスト", "プロファイリング", "ボトルネック", "障害対応",
+    "脆弱性", "ペネトレーションテスト", "可用性", "スケーラビリティ",
+    // Korean
+    "아키텍처", "디버그", "디버깅", "리팩토링", "설계", "재설계",
+    "마이그레이션", "최적화", "보안 감사", "성능", "조사", "근본 원인",
+    "재작성", "코드 리뷰", "기술 부채", "부하 테스트", "스트레스 테스트",
+    "프로파일링", "병목", "장애 대응", "취약점", "확장성", "고가용성",
+    // Spanish
+    "arquitectura", "depurar", "depuración", "refactorizar", "diseño", "rediseño",
+    "migrar", "migración", "optimizar", "optimización", "auditoría de seguridad",
+    "rendimiento", "investigar", "causa raíz", "reescribir", "revisión de código",
+    "deuda técnica", "prueba de carga", "prueba de estrés", "escalabilidad",
+    "vulnerabilidad", "alta disponibilidad",
+    // French
+    "déboguer", "débogage", "refactoriser", "concevoir", "conception", "migrer",
+    "optimiser", "audit de sécurité", "performance", "enquêter", "cause racine",
+    "réécrire", "revue de code", "dette technique", "test de charge",
+    "test de stress", "goulot d'étranglement", "vulnérabilité", "scalabilité",
+    "haute disponibilité",
+    // Portuguese
+    "depurar", "depuração", "refatorar", "projetar", "migrar", "migração",
+    "otimizar", "otimização", "auditoria de segurança", "desempenho", "investigar",
+    "causa raiz", "reescrever", "revisão de código", "dívida técnica",
+    "teste de carga", "teste de estresse", "gargalo", "vulnerabilidade",
+    "escalabilidade", "alta disponibilidade",
+    // German
+    "debuggen", "refaktorieren", "entwerfen", "migrieren", "optimieren",
+    "sicherheitsaudit", "leistung", "untersuchen", "grundursache", "umschreiben",
+    "code-review", "technische schulden", "lasttest", "stresstest", "engpass",
+    "schwachstelle", "skalierbarkeit", "hochverfügbarkeit",
+    // Russian
+    "архитектура", "отладка", "рефакторинг", "проектирование", "миграция",
+    "оптимизация", "аудит безопасности", "производительность", "расследовать",
+    "первопричина", "переписать", "ревью кода", "технический долг",
+    "нагрузочное тестирование", "стресс-тест", "узкое место", "уязвимость",
+    "масштабируемость", "отказоустойчивость",
+    // Arabic
+    "هندسة", "تصحيح", "إعادة هيكلة", "تصميم", "ترحيل", "تحسين",
+    "تدقيق أمني", "أداء", "تحقيق", "السبب الجذري", "إعادة كتابة",
+    "مراجعة الكود", "الديون التقنية", "اختبار الحمل", "اختبار الإجهاد",
+    "عنق الزجاجة", "ثغرة أمنية", "قابلية التوسع",
+    // Hindi
+    "आर्किटेक्चर", "डीबग", "डिबगिंग", "रीफैक्टरिंग", "डिज़ाइन",
+    "माइग्रेशन", "ऑप्टिमाइज़", "ऑप्टिमाइज़ेशन", "सुरक्षा ऑडिट", "प्रदर्शन",
+    "जांच", "मूल कारण", "फिर से लिखें", "कोड रिव्यू", "तकनीकी ऋण",
+    "लोड टेस्ट", "स्ट्रेस टेस्ट", "बॉटलनेक", "भेद्यता", "स्केलेबिलिटी",
+    // Thai
+    "สถาปัตยกรรม", "ดีบัก", "รีแฟกเตอร์", "ออกแบบ", "ย้ายระบบ", "เพิ่มประสิทธิภาพ",
+    "ตรวจสอบความปลอดภัย", "ประสิทธิภาพ", "สืบสวน", "สาเหตุหลัก", "เขียนใหม่",
+    "ทบทวนโค้ด", "หนี้เทคนิค", "ทดสอบโหลด", "คอขวด", "ช่องโหว่",
+    // Indonesian / Malay
+    "arsitektur", "debug", "refaktor", "desain", "migrasi", "optimasi",
+    "audit keamanan", "performa", "investigasi", "akar masalah", "tulis ulang",
+    "review kode", "utang teknis", "uji beban", "kerentanan", "skalabilitas",
+    // Turkish
+    "mimari", "hata ayıklama", "yeniden düzenleme", "tasarım", "göç",
+    "optimizasyon", "güvenlik denetimi", "performans", "araştırma",
+    "kök neden", "yeniden yazma", "kod inceleme", "teknik borç",
+    "yük testi", "darboğaz", "güvenlik açığı", "ölçeklenebilirlik",
+    // Polish
+    "architektura", "debugowanie", "refaktoryzacja", "projektowanie", "migracja",
+    "optymalizacja", "audyt bezpieczeństwa", "wydajność", "badanie",
+    "przyczyna źródłowa", "przepisanie", "przegląd kodu", "dług techniczny",
+    "test obciążenia", "wąskie gardło", "podatność", "skalowalność",
+    // Dutch
+    "architectuur", "debuggen", "refactoren", "ontwerpen", "migreren",
+    "optimaliseren", "beveiligingsaudit", "prestatie", "onderzoeken",
+    "grondoorzaak", "herschrijven", "code review", "technische schuld",
+    "belastingstest", "knelpunt", "kwetsbaarheid", "schaalbaarheid",
+    // Italian
+    "architettura", "debug", "refactoring", "progettazione", "migrazione",
+    "ottimizzazione", "audit di sicurezza", "prestazioni", "indagine",
+    "causa principale", "riscrittura", "revisione del codice", "debito tecnico",
+    "test di carico", "collo di bottiglia", "vulnerabilità", "scalabilità",
+    // Ukrainian
+    "архітектура", "налагодження", "рефакторинг", "проєктування", "міграція",
+    "оптимізація", "аудит безпеки", "продуктивність", "розслідування",
+    "першопричина", "переписати", "огляд коду", "технічний борг",
+    "навантажувальне тестування", "вузьке місце", "вразливість", "масштабованість",
+    // Swedish
+    "arkitektur", "felsökning", "refaktorering", "design", "migrering",
+    "optimering", "säkerhetsrevision", "prestanda", "undersöka",
+    "grundorsak", "skriva om", "kodgranskning", "teknisk skuld",
+    "belastningstest", "flaskhals", "sårbarhet", "skalbarhet",
 ];
 
 /// Greeting/farewell patterns that indicate a trivial message.
+/// Multilingual: EN, VI, ZH (Simplified + Traditional), JA, KO, ES, FR, PT, DE,
+/// RU, AR, HI, TH, ID/MS, TR, PL, NL, IT, UK, SV
 const TRIVIAL_PATTERNS: &[&str] = &[
-    "hi",
-    "hello",
-    "hey",
-    "thanks",
-    "thank you",
-    "bye",
-    "goodbye",
-    "good morning",
-    "good evening",
-    "good night",
-    "ok",
-    "okay",
-    "got it",
-    "sure",
-    "yes",
+    // English (exhaustive — formal, informal, slang, abbreviations)
+    "hi", "hello", "hey", "yo", "sup", "howdy", "hiya", "heya",
+    "thanks", "thank you", "thx", "ty", "tysm", "thank u", "cheers",
+    "bye", "goodbye", "see ya", "later", "cya", "ttyl", "peace",
+    "good morning", "good afternoon", "good evening", "good night", "gm", "gn",
+    "ok", "okay", "k", "kk", "okie", "alright", "aight",
+    "got it", "gotcha", "roger", "copy", "acknowledged", "noted",
+    "sure", "yea", "yeah", "yes", "yep", "yup", "ya", "ye", "aye",
+    "no", "nah", "nope", "naw",
+    "cool", "nice", "great", "awesome", "perfect", "sweet", "dope", "sick",
+    "amazing", "wonderful", "excellent", "brilliant", "fantastic", "lit",
+    "understood", "makes sense", "fair enough", "i see", "ah ok", "oh ok",
+    "np", "no problem", "no worries", "all good", "sounds good", "lgtm",
+    "same", "true", "right", "correct", "exactly", "indeed", "agreed",
+    "lol", "lmao", "haha", "hehe", "xd",
+    // Emoji (universal)
+    "\u{1f44d}", "\u{1f64f}", "\u{1f44c}", "\u{2764}", "\u{2705}", "\u{1f389}",
+    "\u{1f60a}", "\u{1f642}", "\u{1f44f}", "\u{1f525}", "\u{2b50}", "\u{1f4af}",
+    "\u{2714}", "\u{1f91d}", "\u{270c}", "\u{1f64c}", "\u{1f60d}", "\u{1f929}",
+    // Vietnamese (formal + informal + regional + slang)
+    "xin chào", "chào", "chào bạn", "chào anh", "chào chị", "chào em",
+    "cảm ơn", "cám ơn", "cảm ơn bạn", "cảm ơn nhiều", "thanks",
+    "tạm biệt", "bái bai", "bye",
+    "chào buổi sáng", "chào buổi chiều", "chào buổi tối",
+    "được", "ừ", "ờ", "ừm", "uh", "uhm", "rồi", "xong",
+    "hiểu rồi", "hiểu", "ok rồi",
+    "vâng", "dạ", "dạ vâng", "vâng ạ",
+    "không", "ko", "k", "hông", "hem",
+    "tốt", "hay", "tuyệt", "tuyệt vời", "xuất sắc", "giỏi",
+    "đúng", "đúng rồi", "chính xác", "chuẩn",
+    "ổn", "ok", "okie", "oke",
+    "hay đấy", "ngon", "xịn", "max",
+    // Chinese (Simplified)
+    "你好", "嗨", "嘿", "哈喽", "早", "早安", "晚安",
+    "谢谢", "感谢", "多谢", "谢了", "thx",
+    "再见", "拜拜", "拜", "回见", "走了",
+    "早上好", "下午好", "晚上好",
+    "好的", "好", "行", "可以", "没问题", "嗯", "嗯嗯",
+    "是", "是的", "对", "对的", "没错", "确实",
+    "不是", "不", "不行", "不了",
+    "明白", "了解", "知道了", "收到", "懂了",
+    "棒", "厉害", "牛", "赞", "完美", "太好了", "不错", "很好",
+    "哈哈", "呵呵", "嘻嘻",
+    // Chinese (Traditional)
+    "你好", "嗨", "謝謝", "感謝", "再見", "掰掰", "早安", "晚安",
+    "好的", "行", "嗯", "是", "不是", "明白", "了解", "收到",
+    "棒", "讚", "完美", "太好了", "不錯",
+    // Japanese (formal + informal + casual)
+    "こんにちは", "おはよう", "おはようございます", "こんばんは",
+    "ありがとう", "ありがとうございます", "どうも", "サンキュー",
+    "さようなら", "じゃあね", "またね", "バイバイ", "おやすみ",
+    "はい", "うん", "ええ", "そうです",
+    "いいえ", "いや", "ううん",
+    "了解", "了解です", "わかった", "わかりました", "承知しました", "りょ",
+    "いいね", "すごい", "素晴らしい", "完璧", "最高", "ナイス",
+    "おけ", "おっけー", "オッケー",
+    "笑", "草", "www",
+    // Korean (formal + informal)
+    "안녕", "안녕하세요", "안녕하십니까",
+    "감사합니다", "감사해요", "고마워", "고맙습니다", "땡큐",
+    "잘가", "안녕히 가세요", "바이바이",
+    "좋은 아침", "좋은 저녁",
+    "네", "예", "응", "어", "그래",
+    "아니요", "아니", "아뇨",
+    "알겠어", "알겠습니다", "이해했어", "ㅇㅋ", "ㅇㅇ",
+    "좋아", "좋아요", "좋습니다", "멋져", "완벽", "최고", "대박",
+    "ㅋㅋ", "ㅋㅋㅋ", "ㅎㅎ", "ㅎㅎㅎ",
+    // Spanish
+    "hola", "buenas", "qué tal", "hey",
+    "gracias", "muchas gracias", "grax",
+    "adiós", "chao", "nos vemos", "hasta luego",
+    "buenos días", "buenas tardes", "buenas noches",
+    "vale", "ok", "de acuerdo", "entendido", "listo",
+    "sí", "si", "claro", "por supuesto",
+    "no", "nada", "para nada",
+    "genial", "perfecto", "excelente", "increíble", "guay", "mola",
+    "jaja", "jajaja",
+    // French
+    "salut", "bonjour", "bonsoir", "coucou",
+    "merci", "merci beaucoup",
+    "au revoir", "à bientôt", "salut", "ciao",
+    "oui", "ouais", "mouais",
+    "non", "nan",
+    "d'accord", "ok", "compris", "entendu", "c'est noté", "vu",
+    "super", "parfait", "génial", "excellent", "magnifique", "top", "nickel",
+    "mdr", "ptdr",
+    // Portuguese
+    "olá", "oi", "e aí", "fala",
+    "obrigado", "obrigada", "valeu", "vlw",
+    "tchau", "até mais", "falou", "flw",
+    "bom dia", "boa tarde", "boa noite",
+    "sim", "claro", "com certeza",
+    "não", "nope",
+    "tudo bem", "beleza", "show", "massa",
+    "legal", "perfeito", "excelente", "entendi", "entendido",
+    "kkk", "kkkk", "haha", "rsrs",
+    // German
+    "hallo", "hi", "moin", "servus", "grüß gott",
+    "danke", "danke schön", "vielen dank",
+    "tschüss", "auf wiedersehen", "ciao",
+    "guten morgen", "guten tag", "guten abend", "gute nacht",
+    "ja", "jo", "jep", "jawohl",
+    "nein", "nö", "nee",
+    "alles klar", "verstanden", "in ordnung", "geht klar", "passt",
+    "toll", "super", "prima", "perfekt", "klasse", "spitze", "geil",
+    // Russian
+    "привет", "здравствуйте", "здравствуй", "хай", "хей", "йо",
+    "спасибо", "спс", "благодарю",
+    "пока", "до свидания", "до встречи", "бай",
+    "доброе утро", "добрый день", "добрый вечер", "спокойной ночи",
+    "да", "ага", "угу", "ок", "окей", "лады", "ладно",
+    "нет", "не", "неа",
+    "хорошо", "понял", "понятно", "ясно", "принято",
+    "отлично", "круто", "класс", "супер", "зачёт", "кайф", "огонь",
+    "лол", "ахах", "хаха",
+    // Arabic
+    "مرحبا", "أهلا", "أهلاً", "السلام عليكم", "هلا",
+    "شكرا", "شكراً", "مشكور",
+    "مع السلامة", "باي",
+    "صباح الخير", "مساء الخير",
+    "نعم", "أيوه", "اي", "ايوا",
+    "لا", "لأ",
+    "حسنا", "تمام", "ماشي", "أوكي",
+    "ممتاز", "مفهوم", "واضح", "رائع", "حلو",
+    "هههه", "ههه",
+    // Hindi
+    "नमस्ते", "नमस्कार", "हैलो", "हाय",
+    "धन्यवाद", "शुक्रिया", "थैंक्स",
+    "अलविदा", "बाय",
+    "सुप्रभात", "शुभ संध्या", "शुभ रात्रि",
+    "हाँ", "हां", "जी", "जी हाँ", "बिल्कुल",
+    "नहीं", "ना",
+    "ठीक है", "ठीक", "ओके", "अच्छा", "सही",
+    "समझ गया", "समझा", "पता चला",
+    "बहुत बढ़िया", "शानदार", "ज़बरदस्त", "मस्त", "क्लास",
+    // Thai
+    "สวัสดี", "สวัสดีครับ", "สวัสดีค่ะ", "หวัดดี",
+    "ขอบคุณ", "ขอบคุณครับ", "ขอบคุณค่ะ", "แต๊งกิ้ว",
+    "ลาก่อน", "บาย", "ไปก่อนนะ",
+    "อรุณสวัสดิ์", "ราตรีสวัสดิ์",
+    "ใช่", "ครับ", "ค่ะ", "จ้า", "จ้ะ",
+    "ไม่", "เปล่า", "ไม่ใช่",
+    "โอเค", "ตกลง", "เข้าใจ", "รับทราบ",
+    "เยี่ยม", "สุดยอด", "เจ๋ง", "ดีมาก", "เริ่ด",
+    "555", "5555",
+    // Indonesian / Malay
+    "halo", "hai", "hey",
+    "terima kasih", "makasih", "thanks",
+    "selamat tinggal", "dadah", "bye",
+    "selamat pagi", "selamat malam",
+    "ya", "iya", "yoi", "iye",
+    "tidak", "nggak", "gak", "enggak",
+    "oke", "ok", "siap", "paham", "mengerti",
+    "bagus", "mantap", "keren", "sempurna", "luar biasa",
+    "wkwk", "wkwkwk", "haha",
+    // Turkish
+    "merhaba", "selam", "hey",
+    "teşekkürler", "teşekkür ederim", "sağol",
+    "hoşça kal", "görüşürüz", "bay bay",
+    "günaydın", "iyi akşamlar", "iyi geceler",
+    "evet", "he", "hı",
+    "hayır", "yok",
+    "tamam", "ok", "anlaşıldı", "anladım",
+    "harika", "mükemmel", "süper", "güzel",
+    // Polish
+    "cześć", "hej", "siema", "witam",
+    "dzięki", "dziękuję",
+    "pa", "do widzenia", "nara",
+    "dzień dobry", "dobry wieczór", "dobranoc",
+    "tak", "no", "ta",
+    "nie",
+    "ok", "okej", "rozumiem", "jasne", "spoko",
+    "super", "świetnie", "idealnie", "ekstra",
+    // Dutch
+    "hallo", "hoi", "hey", "dag",
+    "bedankt", "dankje", "dank je wel",
+    "doei", "tot ziens", "dag",
+    "goedemorgen", "goedenavond", "goedenacht",
+    "ja", "jawel",
+    "nee",
+    "oké", "begrepen", "duidelijk", "prima",
+    "gaaf", "top", "mooi", "perfect",
+    // Italian
+    "ciao", "salve", "buongiorno", "buonasera",
+    "grazie", "grazie mille",
+    "arrivederci", "addio",
+    "buonanotte",
+    "sì", "certo", "sicuro",
     "no",
-    "yep",
-    "nope",
-    "cool",
-    "nice",
-    "great",
-    "awesome",
-    "perfect",
-    "understood",
-    "\u{1f44d}",
-    "\u{1f64f}",
+    "ok", "va bene", "capito", "inteso",
+    "perfetto", "fantastico", "ottimo", "bello", "grande",
+    // Ukrainian
+    "привіт", "здоровенькі були", "вітаю",
+    "дякую", "дякую",
+    "бувай", "до побачення",
+    "доброго ранку", "добрий день", "добрий вечір",
+    "так", "ага", "угу",
+    "ні", "не",
+    "добре", "зрозумів", "зрозуміло", "ок",
+    "чудово", "круто", "клас", "супер",
+    // Swedish
+    "hej", "hallå", "tjena", "tja",
+    "tack", "tack så mycket",
+    "hejdå", "vi ses",
+    "god morgon", "god kväll", "god natt",
+    "ja", "japp", "jo",
+    "nej", "nä",
+    "okej", "fattar", "förstått", "klart",
+    "bra", "toppen", "perfekt", "grym", "najs",
 ];
 
 /// Action verbs that indicate a non-trivial task.
+/// Multilingual: EN, VI, ZH (Simplified + Traditional), JA, KO, ES, FR, PT, DE,
+/// RU, AR, HI, TH, ID/MS, TR, PL, NL, IT, UK, SV
 const ACTION_VERBS: &[&str] = &[
-    "find",
-    "create",
-    "run",
-    "deploy",
-    "read",
-    "write",
-    "search",
-    "build",
-    "fix",
-    "update",
-    "delete",
-    "install",
-    "configure",
-    "setup",
-    "check",
-    "test",
-    "compile",
-    "execute",
-    "fetch",
-    "download",
-    "upload",
-    "send",
-    "list",
-    "show",
-    "display",
-    "open",
-    "close",
-    "start",
-    "stop",
-    "restart",
-    "analyze",
-    "explain",
-    "help me",
-    "can you",
-    "please",
+    // English (exhaustive — formal, informal, imperative, polite)
+    "find", "create", "run", "deploy", "read", "write", "search", "build",
+    "fix", "update", "delete", "install", "configure", "setup", "set up",
+    "check", "test", "compile", "execute", "fetch", "download", "upload",
+    "send", "list", "show", "display", "open", "close", "start", "stop",
+    "restart", "analyze", "analyse", "explain", "help me", "can you",
+    "please", "could you", "would you", "generate", "convert", "transform",
+    "compare", "merge", "split", "sort", "filter", "count", "calculate",
+    "compute", "rename", "move", "copy", "paste", "undo", "redo",
+    "connect", "disconnect", "sync", "backup", "restore", "reset",
+    "enable", "disable", "toggle", "switch", "change", "modify", "edit",
+    "add", "remove", "insert", "append", "prepend", "replace", "swap",
+    "print", "log", "dump", "export", "import", "parse", "format",
+    "validate", "verify", "confirm", "approve", "reject", "publish",
+    "schedule", "cancel", "abort", "kill", "terminate", "clean", "clear",
+    "purge", "flush", "trim", "truncate", "compress", "decompress",
+    "encrypt", "decrypt", "sign", "hash", "encode", "decode",
+    "monitor", "watch", "track", "trace", "profile", "measure",
+    "look up", "look into", "figure out", "work on", "set up", "spin up",
+    "tear down", "roll back", "scale up", "scale down",
+    // Vietnamese (formal + informal + imperative)
+    "tìm", "tạo", "chạy", "triển khai", "đọc", "viết", "tìm kiếm",
+    "xây dựng", "xây", "sửa", "cập nhật", "xóa", "xoá", "cài đặt",
+    "cấu hình", "thiết lập", "kiểm tra", "biên dịch", "thực thi",
+    "tải về", "tải xuống", "tải lên", "gửi", "liệt kê", "hiển thị",
+    "hiện", "mở", "đóng", "bắt đầu", "dừng", "dừng lại", "tắt",
+    "khởi động", "khởi động lại", "phân tích", "giải thích",
+    "giúp tôi", "giúp mình", "giúp em", "hãy", "cho tôi", "cho mình",
+    "làm", "làm cho", "thêm", "bớt", "bỏ", "đổi", "đổi tên",
+    "sao chép", "di chuyển", "nén", "giải nén", "mã hóa", "giải mã",
+    "kết nối", "ngắt kết nối", "đồng bộ", "sao lưu", "khôi phục",
+    "bật", "tắt", "chuyển đổi", "so sánh", "gộp", "tách",
+    "đếm", "tính", "xuất", "nhập", "xác nhận", "xác minh",
+    "theo dõi", "giám sát", "đo", "in",
+    // Chinese (Simplified)
+    "查找", "找", "创建", "建", "运行", "跑", "部署", "读取", "读",
+    "写入", "写", "搜索", "搜", "构建", "修复", "修", "更新",
+    "删除", "删", "安装", "装", "配置", "设置", "检查", "查",
+    "测试", "编译", "执行", "下载", "上传", "发送", "发",
+    "列出", "列", "显示", "看", "打开", "开", "关闭", "关",
+    "启动", "停止", "停", "重启", "分析", "解释", "帮我", "请",
+    "帮忙", "能不能", "可以", "添加", "加", "移除", "去掉",
+    "复制", "拷贝", "移动", "重命名", "改名", "合并", "拆分",
+    "排序", "过滤", "计算", "算", "统计", "转换", "格式化",
+    "压缩", "解压", "加密", "解密", "连接", "断开", "同步",
+    "备份", "恢复", "监控", "跟踪", "导出", "导入",
+    // Chinese (Traditional)
+    "查找", "建立", "執行", "部署", "讀取", "寫入", "搜尋", "建構",
+    "修復", "更新", "刪除", "安裝", "設定", "檢查", "測試", "編譯",
+    "下載", "上傳", "傳送", "顯示", "開啟", "關閉", "啟動", "停止",
+    "重啟", "分析", "解釋", "幫我", "請",
+    // Japanese
+    "探す", "見つける", "作成", "作る", "実行", "走らせる", "デプロイ",
+    "読む", "読み込む", "書く", "書き込む", "検索", "ビルド", "修正",
+    "直す", "更新", "削除", "消す", "インストール", "入れる", "設定",
+    "確認", "テスト", "コンパイル", "ダウンロード", "落とす",
+    "アップロード", "上げる", "送信", "送る", "表示", "見せる",
+    "開く", "閉じる", "起動", "立ち上げる", "停止", "止める",
+    "再起動", "分析", "説明", "教えて", "して", "してください",
+    "お願い", "追加", "削る", "移動", "コピー", "変更", "変える",
+    "名前変更", "結合", "マージ", "分割", "ソート", "フィルター",
+    "計算", "変換", "フォーマット", "圧縮", "解凍", "暗号化", "復号",
+    "接続", "切断", "同期", "バックアップ", "復元", "監視",
+    "エクスポート", "インポート",
+    // Korean
+    "찾기", "찾아", "만들기", "만들어", "실행", "돌려", "배포",
+    "읽기", "읽어", "쓰기", "써", "검색", "빌드", "수정", "고쳐",
+    "업데이트", "삭제", "지워", "설치", "깔아", "설정", "확인",
+    "테스트", "컴파일", "다운로드", "받아", "업로드", "올려",
+    "보내기", "보내", "목록", "표시", "보여줘", "열기", "열어",
+    "닫기", "닫아", "시작", "중지", "멈춰", "재시작", "분석",
+    "설명", "설명해줘", "도와줘", "해줘", "해주세요",
+    "추가", "제거", "이동", "복사", "변경", "바꿔",
+    "이름 변경", "병합", "분할", "정렬", "필터", "계산",
+    "변환", "포맷", "압축", "암호화", "복호화", "연결", "동기화",
+    "백업", "복원", "모니터링", "내보내기", "가져오기",
+    // Spanish
+    "buscar", "crear", "ejecutar", "correr", "desplegar", "leer", "escribir",
+    "construir", "arreglar", "reparar", "actualizar", "eliminar", "borrar",
+    "instalar", "configurar", "comprobar", "verificar", "probar", "compilar",
+    "descargar", "subir", "cargar", "enviar", "mostrar", "enseñar",
+    "abrir", "cerrar", "iniciar", "arrancar", "detener", "parar",
+    "reiniciar", "analizar", "explicar", "ayúdame", "por favor",
+    "puedes", "podrías", "añadir", "agregar", "quitar", "mover",
+    "copiar", "renombrar", "combinar", "dividir", "ordenar", "filtrar",
+    "calcular", "convertir", "formatear", "comprimir", "cifrar",
+    "conectar", "sincronizar", "respaldar", "restaurar", "monitorear",
+    "exportar", "importar",
+    // French
+    "chercher", "trouver", "créer", "exécuter", "lancer", "déployer",
+    "lire", "écrire", "construire", "corriger", "réparer",
+    "mettre à jour", "supprimer", "effacer", "installer", "configurer",
+    "vérifier", "tester", "compiler", "télécharger", "envoyer",
+    "afficher", "montrer", "ouvrir", "fermer", "démarrer", "arrêter",
+    "redémarrer", "analyser", "expliquer", "aidez-moi", "aide-moi",
+    "s'il vous plaît", "s'il te plaît", "peux-tu", "pouvez-vous",
+    "ajouter", "retirer", "déplacer", "copier", "renommer",
+    "fusionner", "diviser", "trier", "filtrer", "calculer", "convertir",
+    "formater", "compresser", "chiffrer", "connecter", "synchroniser",
+    "sauvegarder", "restaurer", "surveiller", "exporter", "importer",
+    // Portuguese
+    "procurar", "encontrar", "criar", "rodar", "executar", "implantar",
+    "ler", "escrever", "construir", "corrigir", "consertar", "atualizar",
+    "excluir", "apagar", "deletar", "instalar", "configurar", "verificar",
+    "checar", "testar", "compilar", "baixar", "enviar", "mostrar",
+    "exibir", "abrir", "fechar", "iniciar", "começar", "parar",
+    "reiniciar", "analisar", "explicar", "me ajude", "por favor",
+    "pode", "poderia", "adicionar", "remover", "mover", "copiar",
+    "renomear", "mesclar", "dividir", "ordenar", "filtrar", "calcular",
+    "converter", "formatar", "comprimir", "criptografar", "conectar",
+    "sincronizar", "fazer backup", "restaurar", "monitorar",
+    "exportar", "importar",
+    // German
+    "suchen", "finden", "erstellen", "ausführen", "bereitstellen", "lesen",
+    "schreiben", "bauen", "reparieren", "beheben", "aktualisieren",
+    "löschen", "entfernen", "installieren", "konfigurieren", "einrichten",
+    "prüfen", "testen", "kompilieren", "herunterladen", "hochladen",
+    "senden", "anzeigen", "zeigen", "öffnen", "schließen", "starten",
+    "stoppen", "beenden", "neustarten", "analysieren", "erklären",
+    "hilf mir", "bitte", "kannst du", "könntest du",
+    "hinzufügen", "entfernen", "verschieben", "kopieren", "umbenennen",
+    "zusammenführen", "aufteilen", "sortieren", "filtern", "berechnen",
+    "konvertieren", "formatieren", "komprimieren", "verschlüsseln",
+    "verbinden", "synchronisieren", "sichern", "wiederherstellen",
+    "überwachen", "exportieren", "importieren",
+    // Russian
+    "найти", "создать", "запустить", "развернуть", "читать", "прочитать",
+    "написать", "записать", "искать", "собрать", "исправить", "починить",
+    "обновить", "удалить", "убрать", "установить", "поставить",
+    "настроить", "сконфигурировать", "проверить", "тестировать",
+    "скомпилировать", "скачать", "загрузить", "отправить", "послать",
+    "показать", "вывести", "открыть", "закрыть", "запустить",
+    "остановить", "перезапустить", "анализировать", "объяснить",
+    "помоги", "пожалуйста", "можешь", "мог бы",
+    "добавить", "убрать", "переместить", "копировать", "переименовать",
+    "объединить", "разделить", "отсортировать", "отфильтровать",
+    "посчитать", "вычислить", "конвертировать", "форматировать",
+    "сжать", "зашифровать", "подключить", "синхронизировать",
+    "сделать бэкап", "восстановить", "мониторить", "экспортировать",
+    "импортировать",
+    // Arabic
+    "ابحث", "أنشئ", "شغّل", "انشر", "اقرأ", "اكتب", "ابحث",
+    "ابنِ", "أصلح", "حدّث", "احذف", "ثبّت", "اضبط", "افحص",
+    "اختبر", "حمّل", "ارفع", "أرسل", "اعرض", "افتح", "أغلق",
+    "ابدأ", "أوقف", "أعد التشغيل", "حلّل", "اشرح", "ساعدني",
+    "من فضلك", "هل يمكنك", "أضف", "أزل", "انقل", "انسخ",
+    "أعد التسمية", "ادمج", "قسّم", "رتّب", "صفّ", "احسب",
+    "حوّل", "نسّق", "اضغط", "شفّر", "اتصل", "زامن",
+    "انسخ احتياطياً", "استعد", "راقب", "صدّر", "استورد",
+    // Hindi
+    "खोजें", "बनाएं", "चलाएं", "तैनात करें", "पढ़ें", "लिखें",
+    "खोज करें", "बनाना", "ठीक करें", "सुधारें", "अपडेट करें",
+    "हटाएं", "मिटाएं", "इंस्टॉल करें", "सेटअप करें", "जांचें",
+    "टेस्ट करें", "कंपाइल करें", "डाउनलोड करें", "अपलोड करें",
+    "भेजें", "दिखाएं", "खोलें", "बंद करें", "शुरू करें",
+    "रोकें", "रीस्टार्ट करें", "विश्लेषण करें", "समझाएं",
+    "मदद करो", "मदद कीजिए", "कृपया", "क्या आप",
+    "जोड़ें", "निकालें", "हटाएं", "कॉपी करें", "नाम बदलें",
+    "मर्ज करें", "विभाजित करें", "क्रमबद्ध करें", "गणना करें",
+    "बदलें", "फॉर्मैट करें", "कनेक्ट करें", "सिंक करें",
+    "बैकअप करें", "रिस्टोर करें", "मॉनिटर करें",
+    // Thai
+    "หา", "ค้นหา", "สร้าง", "รัน", "เดพลอย", "อ่าน", "เขียน",
+    "ค้น", "สร้าง", "แก้", "แก้ไข", "อัปเดต", "ลบ", "ติดตั้ง",
+    "ตั้งค่า", "ตรวจสอบ", "เช็ค", "ทดสอบ", "คอมไพล์", "ดาวน์โหลด",
+    "อัปโหลด", "ส่ง", "แสดง", "ดู", "เปิด", "ปิด", "เริ่ม",
+    "หยุด", "รีสตาร์ท", "วิเคราะห์", "อธิบาย", "ช่วย", "ได้ไหม",
+    "เพิ่ม", "ลบ", "ย้าย", "คัดลอก", "เปลี่ยนชื่อ", "รวม",
+    "แยก", "เรียง", "กรอง", "คำนวณ", "แปลง", "บีบอัด",
+    "เข้ารหัส", "เชื่อมต่อ", "ซิงค์", "สำรอง", "กู้คืน", "ติดตาม",
+    // Indonesian / Malay
+    "cari", "buat", "jalankan", "deploy", "baca", "tulis", "cari",
+    "bangun", "perbaiki", "perbarui", "hapus", "pasang", "instal",
+    "konfigurasi", "atur", "periksa", "cek", "uji", "tes", "kompilasi",
+    "unduh", "download", "unggah", "upload", "kirim", "tampilkan",
+    "lihat", "buka", "tutup", "mulai", "hentikan", "restart",
+    "analisis", "jelaskan", "tolong", "bantu", "bisa",
+    "tambah", "buang", "pindah", "salin", "ganti nama", "gabung",
+    "pisah", "urutkan", "filter", "hitung", "konversi", "format",
+    "kompres", "enkripsi", "hubungkan", "sinkronkan", "cadangkan",
+    "pulihkan", "pantau", "ekspor", "impor",
+    // Turkish
+    "bul", "oluştur", "çalıştır", "dağıt", "oku", "yaz", "ara",
+    "kur", "düzelt", "güncelle", "sil", "yükle", "kur", "yapılandır",
+    "ayarla", "kontrol et", "test et", "derle", "indir", "yükle",
+    "gönder", "göster", "listele", "aç", "kapat", "başlat", "durdur",
+    "yeniden başlat", "analiz et", "açıkla", "yardım et", "lütfen",
+    "ekle", "kaldır", "taşı", "kopyala", "yeniden adlandır", "birleştir",
+    "böl", "sırala", "filtrele", "hesapla", "dönüştür", "biçimlendir",
+    "sıkıştır", "şifrele", "bağlan", "senkronize et", "yedekle",
+    "geri yükle", "izle", "dışa aktar", "içe aktar",
+    // Polish
+    "znajdź", "szukaj", "utwórz", "stwórz", "uruchom", "wdróż",
+    "czytaj", "przeczytaj", "napisz", "zapisz", "zbuduj", "napraw",
+    "zaktualizuj", "usuń", "skasuj", "zainstaluj", "skonfiguruj",
+    "ustaw", "sprawdź", "przetestuj", "skompiluj", "pobierz",
+    "prześlij", "wyślij", "pokaż", "wyświetl", "otwórz", "zamknij",
+    "uruchom", "zatrzymaj", "restartuj", "analizuj", "wyjaśnij",
+    "pomóż", "proszę", "czy możesz",
+    "dodaj", "usuń", "przenieś", "kopiuj", "zmień nazwę", "połącz",
+    "podziel", "sortuj", "filtruj", "oblicz", "konwertuj", "formatuj",
+    "skompresuj", "zaszyfruj", "połącz", "synchronizuj", "zrób backup",
+    "przywróć", "monitoruj", "eksportuj", "importuj",
+    // Dutch
+    "zoek", "vind", "maak", "aanmaken", "uitvoeren", "draaien",
+    "deployen", "lees", "schrijf", "bouwen", "repareren", "fixen",
+    "bijwerken", "updaten", "verwijderen", "wissen", "installeren",
+    "configureren", "instellen", "controleren", "checken", "testen",
+    "compileren", "downloaden", "uploaden", "verzenden", "sturen",
+    "tonen", "laten zien", "openen", "sluiten", "starten", "stoppen",
+    "herstarten", "analyseren", "uitleggen", "help me", "alsjeblieft",
+    "kun je", "toevoegen", "verplaatsen", "kopiëren", "hernoemen",
+    "samenvoegen", "splitsen", "sorteren", "filteren", "berekenen",
+    "converteren", "formatteren", "comprimeren", "versleutelen",
+    "verbinden", "synchroniseren", "back-uppen", "herstellen",
+    "monitoren", "exporteren", "importeren",
+    // Italian
+    "cercare", "trovare", "creare", "eseguire", "distribuire",
+    "leggere", "scrivere", "costruire", "correggere", "riparare",
+    "aggiornare", "eliminare", "cancellare", "installare", "configurare",
+    "impostare", "controllare", "verificare", "testare", "compilare",
+    "scaricare", "caricare", "inviare", "mostrare", "visualizzare",
+    "aprire", "chiudere", "avviare", "fermare", "riavviare",
+    "analizzare", "spiegare", "aiutami", "per favore", "puoi",
+    "aggiungere", "rimuovere", "spostare", "copiare", "rinominare",
+    "unire", "dividere", "ordinare", "filtrare", "calcolare",
+    "convertire", "formattare", "comprimere", "crittografare",
+    "connettere", "sincronizzare", "eseguire backup", "ripristinare",
+    "monitorare", "esportare", "importare",
+    // Ukrainian
+    "знайти", "шукати", "створити", "запустити", "розгорнути",
+    "читати", "прочитати", "написати", "записати", "побудувати",
+    "виправити", "полагодити", "оновити", "видалити", "встановити",
+    "налаштувати", "перевірити", "протестувати", "скомпілювати",
+    "завантажити", "вивантажити", "надіслати", "показати",
+    "відкрити", "закрити", "запустити", "зупинити", "перезапустити",
+    "аналізувати", "пояснити", "допоможи", "будь ласка", "чи можеш",
+    "додати", "прибрати", "перемістити", "копіювати", "перейменувати",
+    "об'єднати", "розділити", "відсортувати", "відфільтрувати",
+    "обчислити", "конвертувати", "форматувати", "стиснути",
+    "зашифрувати", "підключити", "синхронізувати", "зробити бекап",
+    "відновити", "моніторити", "експортувати", "імпортувати",
+    // Swedish
+    "hitta", "sök", "skapa", "köra", "kör", "distribuera",
+    "läsa", "läs", "skriva", "skriv", "bygga", "fixa", "laga",
+    "uppdatera", "radera", "ta bort", "installera", "konfigurera",
+    "ställ in", "kontrollera", "kolla", "testa", "kompilera",
+    "ladda ner", "ladda upp", "skicka", "visa", "öppna", "stänga",
+    "starta", "stoppa", "starta om", "analysera", "förklara",
+    "hjälp mig", "snälla", "kan du",
+    "lägg till", "flytta", "kopiera", "byt namn", "slå ihop",
+    "dela", "sortera", "filtrera", "beräkna", "konvertera",
+    "formatera", "komprimera", "kryptera", "anslut", "synkronisera",
+    "säkerhetskopiera", "återställa", "övervaka", "exportera", "importera",
 ];
 
 /// Maximum message length in chars for a trivial classification.
@@ -991,5 +1497,141 @@ mod tests {
             ModelRouter::select_tier(TaskComplexity::Trivial),
             ModelTier::Fast
         );
+    }
+
+    // ── Multilingual classification tests ─────────────────────────────
+
+    #[test]
+    fn trivial_vietnamese_greeting() {
+        let router = make_router();
+        assert_eq!(router.classify_complexity(&[], &[], "chào"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "cảm ơn"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "được"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "ừ"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "vâng"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "tuyệt vời"), TaskComplexity::Trivial);
+    }
+
+    #[test]
+    fn trivial_chinese_greeting() {
+        let router = make_router();
+        assert_eq!(router.classify_complexity(&[], &[], "你好"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "谢谢"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "好的"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "明白"), TaskComplexity::Trivial);
+    }
+
+    #[test]
+    fn trivial_japanese_greeting() {
+        let router = make_router();
+        assert_eq!(router.classify_complexity(&[], &[], "こんにちは"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "ありがとう"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "了解"), TaskComplexity::Trivial);
+    }
+
+    #[test]
+    fn trivial_korean_greeting() {
+        let router = make_router();
+        assert_eq!(router.classify_complexity(&[], &[], "안녕"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "감사합니다"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "ㅇㅋ"), TaskComplexity::Trivial);
+    }
+
+    #[test]
+    fn trivial_european_greetings() {
+        let router = make_router();
+        // Spanish
+        assert_eq!(router.classify_complexity(&[], &[], "hola"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "gracias"), TaskComplexity::Trivial);
+        // French
+        assert_eq!(router.classify_complexity(&[], &[], "bonjour"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "merci"), TaskComplexity::Trivial);
+        // German
+        assert_eq!(router.classify_complexity(&[], &[], "danke"), TaskComplexity::Trivial);
+        // Russian
+        assert_eq!(router.classify_complexity(&[], &[], "привет"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "спасибо"), TaskComplexity::Trivial);
+    }
+
+    #[test]
+    fn trivial_arabic_hindi_thai() {
+        let router = make_router();
+        assert_eq!(router.classify_complexity(&[], &[], "مرحبا"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "شكرا"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "नमस्ते"), TaskComplexity::Trivial);
+        assert_eq!(router.classify_complexity(&[], &[], "สวัสดี"), TaskComplexity::Trivial);
+    }
+
+    #[test]
+    fn complex_vietnamese_keywords() {
+        let router = make_router();
+        assert_eq!(
+            router.classify_complexity(&[], &["shell"], "gỡ lỗi module xác thực"),
+            TaskComplexity::Complex
+        );
+        assert_eq!(
+            router.classify_complexity(&[], &["shell"], "tái cấu trúc hệ thống"),
+            TaskComplexity::Complex
+        );
+        assert_eq!(
+            router.classify_complexity(&[], &["shell"], "tối ưu hóa hiệu suất"),
+            TaskComplexity::Complex
+        );
+    }
+
+    #[test]
+    fn complex_multilingual_keywords() {
+        let router = make_router();
+        // Chinese
+        assert_eq!(
+            router.classify_complexity(&[], &["shell"], "重构认证模块"),
+            TaskComplexity::Complex
+        );
+        // Japanese
+        assert_eq!(
+            router.classify_complexity(&[], &["shell"], "リファクタリングして"),
+            TaskComplexity::Complex
+        );
+        // Korean
+        assert_eq!(
+            router.classify_complexity(&[], &["shell"], "리팩토링 해주세요"),
+            TaskComplexity::Complex
+        );
+        // Spanish
+        assert_eq!(
+            router.classify_complexity(&[], &["shell"], "refactorizar el módulo"),
+            TaskComplexity::Complex
+        );
+        // Russian
+        assert_eq!(
+            router.classify_complexity(&[], &["shell"], "рефакторинг авторизации"),
+            TaskComplexity::Complex
+        );
+    }
+
+    #[test]
+    fn not_trivial_vietnamese_action_verb() {
+        let router = make_router();
+        assert_ne!(
+            router.classify_complexity(&[], &[], "tạo file mới"),
+            TaskComplexity::Trivial
+        );
+        assert_ne!(
+            router.classify_complexity(&[], &[], "giúp tôi sửa lỗi"),
+            TaskComplexity::Trivial
+        );
+    }
+
+    #[test]
+    fn not_trivial_multilingual_action_verbs() {
+        let router = make_router();
+        // Chinese
+        assert_ne!(router.classify_complexity(&[], &[], "帮我创建一个文件"), TaskComplexity::Trivial);
+        // Japanese
+        assert_ne!(router.classify_complexity(&[], &[], "ファイルを作成して"), TaskComplexity::Trivial);
+        // Spanish
+        assert_ne!(router.classify_complexity(&[], &[], "crear un archivo"), TaskComplexity::Trivial);
+        // French
+        assert_ne!(router.classify_complexity(&[], &[], "créer un fichier"), TaskComplexity::Trivial);
     }
 }
