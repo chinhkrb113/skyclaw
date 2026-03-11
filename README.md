@@ -213,12 +213,14 @@ Then set your config:
 ```toml
 [provider]
 name = "openai-codex"
-model = "gpt-5.3-codex"  # or gpt-5.4, gpt-5.2-codex, etc.
+model = "gpt-5.4"  # recommended — reliable tool calling for all task types
 ```
 
-Supported Codex models: `gpt-5.4`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `gpt-5.2-codex`, `gpt-5.2`, `gpt-5.1-codex`, `gpt-5`, `gpt-5-codex-mini`.
+Supported Codex models: `gpt-5.4` (recommended), `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `gpt-5.2-codex`, `gpt-5.2`, `gpt-5.1-codex`, `gpt-5`, `gpt-5-codex-mini`.
 
-The `codex-oauth` feature flag is enabled by default. Tokens are stored in `~/.skyclaw/oauth.json` and auto-refresh before expiry.
+> **Note:** The `*-codex` models are coding-specialized and may inconsistently call tools for general-purpose tasks (web browsing, file creation, etc.). Use `gpt-5.4` or `gpt-5.2` for full agent functionality.
+
+Uses the OpenAI Responses API (not Chat Completions). The `codex-oauth` feature flag is enabled by default. Tokens are stored in `~/.skyclaw/oauth.json` and auto-refresh before expiry.
 
 ## Channels
 
