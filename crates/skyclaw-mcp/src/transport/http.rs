@@ -52,7 +52,8 @@ impl HttpTransport {
         let mut builder = self
             .client
             .post(&self.url)
-            .header("Content-Type", "application/json");
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream");
 
         for (key, value) in &self.extra_headers {
             builder = builder.header(key.as_str(), value.as_str());
