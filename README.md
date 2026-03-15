@@ -68,7 +68,7 @@ My brain has a BUDGET and I am VERY responsible with it.
 - Path and URL highlighting (underlined, clickable)
 - Mouse wheel scrolling + PageUp/PageDown through full chat history
 - Personality modes: Auto (recommended), Play :3, Work >:3, Pro, None (minimal identity)
-- Ctrl+C twice to exit (like Claude Code)
+- Ctrl+D to exit
 - Tem's 7-color palette with truecolor/256-color/NO_COLOR degradation
 - Token and cost tracking in the status bar
 
