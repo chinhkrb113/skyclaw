@@ -1,6 +1,6 @@
 # Context Degradation Benchmark
 
-Date: 2026-03-17 18:10:16 UTC
+Date: 2026-03-18 03:21:22 UTC
 Model: gemini-3.1-pro-preview
 
 ## Hypothesis
@@ -13,7 +13,7 @@ Swarm with fresh context maintains consistent quality.
 | Metric | Single Agent | Swarm |
 |--------|-------------|-------|
 | **Functions passing** | **12/12** | **12/12** |
-| Wall clock | 111537ms | 17998ms |
-| Speedup | — | 6.20x |
-| Tokens | 7183 | 2130 |
-| Cost | $0.002370 | $0.000703 |
+| Wall clock | 102849ms | 17551ms |
+| Speedup | — | 5.86x |
+| Tokens | 7379 | 2149 |
+| Cost | $0.002435 | $0.000709 |
