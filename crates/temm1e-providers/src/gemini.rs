@@ -56,14 +56,15 @@ struct GeminiPart {
     function_response: Option<GeminiFunctionResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     inline_data: Option<GeminiInlineData>,
+    /// Gemini 3 thought signature — sibling of functionCall, must be echoed back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    thought_signature: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct GeminiFunctionCall {
     name: String,
     args: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    thought_signature: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -222,6 +223,7 @@ impl GeminiProvider {
                                         response: serde_json::json!({ "result": content }),
                                     }),
                                     inline_data: None,
+                                    thought_signature: None,
                                 }),
                                 _ => None,
                             })
@@ -253,6 +255,7 @@ impl GeminiProvider {
                         function_call: None,
                         function_response: None,
                         inline_data: None,
+                        thought_signature: None,
                     }],
                 },
             );
@@ -268,6 +271,7 @@ impl GeminiProvider {
                     function_call: None,
                     function_response: None,
                     inline_data: None,
+                    thought_signature: None,
                 }],
             })
         };
@@ -309,6 +313,7 @@ impl GeminiProvider {
                     function_call: None,
                     function_response: None,
                     inline_data: None,
+                    thought_signature: None,
                 }]
             }
             MessageContent::Parts(parts) => parts
@@ -319,6 +324,7 @@ impl GeminiProvider {
                         function_call: None,
                         function_response: None,
                         inline_data: None,
+                    thought_signature: None,
                     }),
                     ContentPart::ToolUse {
                         name,
@@ -330,10 +336,11 @@ impl GeminiProvider {
                         function_call: Some(GeminiFunctionCall {
                             name: name.clone(),
                             args: input.clone(),
-                            thought_signature: thought_signature.clone(),
                         }),
                         function_response: None,
                         inline_data: None,
+                        // Echo thought_signature as sibling of functionCall
+                        thought_signature: thought_signature.clone(),
                     }),
                     ContentPart::Image { media_type, data } => Some(GeminiPart {
                         text: None,
@@ -343,6 +350,7 @@ impl GeminiProvider {
                             mime_type: media_type.clone(),
                             data: data.clone(),
                         }),
+                        thought_signature: None,
                     }),
                     ContentPart::ToolResult { .. } => None, // handled in Tool role
                 })
@@ -369,11 +377,14 @@ impl GeminiProvider {
                             content_parts.push(ContentPart::Text { text: text.clone() });
                         }
                         if let Some(ref fc) = part.function_call {
+                            // Strip default_api: prefix that Gemini 3 adds to tool names
+                            let name = fc.name.strip_prefix("default_api:").unwrap_or(&fc.name).to_string();
                             content_parts.push(ContentPart::ToolUse {
                                 id: format!("gemini-{}", uuid::Uuid::new_v4()),
-                                name: fc.name.clone(),
+                                name,
                                 input: fc.args.clone(),
-                                thought_signature: fc.thought_signature.clone(),
+                                // thoughtSignature is a sibling of functionCall in the part
+                                thought_signature: part.thought_signature.clone(),
                             });
                         }
                     }

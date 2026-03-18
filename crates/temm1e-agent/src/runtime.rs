@@ -1612,6 +1612,11 @@ impl AgentRuntime {
         self.memory.as_ref()
     }
 
+    /// Get the memory backend as an Arc.
+    pub fn memory_arc(&self) -> Arc<dyn Memory> {
+        self.memory.clone()
+    }
+
     /// Get the registered tools.
     pub fn tools(&self) -> &[Arc<dyn Tool>] {
         &self.tools
