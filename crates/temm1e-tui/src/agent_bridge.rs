@@ -133,6 +133,7 @@ pub async fn spawn_agent(
         None, // No setup link generator
         None, // No usage store for tools
         Some(shared_mode.clone()),
+        None, // No vault for TUI mode
     );
 
     // 5. Build system prompt

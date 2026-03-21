@@ -190,6 +190,10 @@ impl PheromoneField {
             SignalType::Urgency,
             SignalType::Progress,
             SignalType::HelpWanted,
+            SignalType::BotDetected,
+            SignalType::SessionExpired,
+            SignalType::DataFound,
+            SignalType::RateLimit,
         ] {
             let total = self.read_total_at(st, target, now_ms).await?;
             if total > 0.0 {

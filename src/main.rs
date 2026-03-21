@@ -223,6 +223,30 @@ async fn validate_provider_key(
 // Placeholder to satisfy the compiler for the deleted block below.
 // The actual functions are now imported at the top of this file.
 /// Check if a user is the admin by reading `~/.temm1e/allowlist.toml`.
+/// Format a capture timestamp into a human-readable age string.
+///
+/// Takes an ISO 8601 timestamp and returns e.g. "2h ago", "5m ago", "1d ago".
+#[cfg(feature = "browser")]
+fn format_capture_age(captured_at: &str) -> String {
+    let captured = match chrono::DateTime::parse_from_rfc3339(captured_at) {
+        Ok(dt) => dt.with_timezone(&chrono::Utc),
+        Err(_) => return "unknown".to_string(),
+    };
+    let elapsed = chrono::Utc::now().signed_duration_since(captured);
+    let secs = elapsed.num_seconds();
+    if secs < 0 {
+        "just now".to_string()
+    } else if secs < 60 {
+        format!("{}s ago", secs)
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86400)
+    }
+}
+
 fn is_admin_user(user_id: &str) -> bool {
     let path = dirs::home_dir().map(|h| h.join(".temm1e").join("allowlist.toml"));
     let path = match path {
@@ -342,7 +366,24 @@ KEY RULES:\n\
   shell(\"sleep N\") then send_message in a loop across tool rounds.\n\
 - When asked to visit a website, open a page, or interact with a web app, \
   USE THE BROWSER TOOL. Do not refuse or explain why you can't — just do it.\n\
-- After finishing browser work, call browser with action 'close' to shut it down.\n\
+- Do NOT close the browser after finishing a task. The browser stays open so \
+  sessions persist (logged-in sites stay logged in). The user controls the \
+  browser lifecycle with /browser close.\n\
+- When using browser observe/accessibility_tree, share key findings with the user. \
+Show them what elements you found (e.g., 'I can see a search box, login button, \
+and 3 article links'). Don't just silently process the tree — the user wants to \
+know what you see.\n\
+- SECURITY: NEVER ask users to send passwords or credentials in chat.\n\
+- LOGIN FLOW (follow this order):\n\
+  1. First try browser action 'restore_web_session' with the service name — the user \
+     may already have a saved session.\n\
+  2. If restore fails, navigate to the login page and take a screenshot.\n\
+  3. If you see a QR code on the page — send the screenshot to the user and say \
+     'Scan this QR code to log in. Tell me when done.' Then wait for the user. \
+     After they confirm, observe the page to verify login succeeded.\n\
+  4. If you see a password form (no QR) — tell the user to use /login <service> \
+     to enter credentials securely. NEVER type passwords yourself.\n\
+  5. Once logged in, the session auto-saves. Future tasks restore automatically.\n\
 - Reply in the same language the user writes in.\n\
 - Be concise. No emoji unless the user uses them.\n\
 - NEVER give up on a task by explaining limitations. You have a multi-round \
@@ -1356,10 +1397,30 @@ async fn main() -> Result<()> {
             let pending_raw_keys: Arc<Mutex<HashSet<String>>> =
                 Arc::new(Mutex::new(HashSet::new()));
 
+            // ── Active login sessions (OTK Prowl — per-chat interactive browser sessions) ────
+            #[cfg(feature = "browser")]
+            let login_sessions: Arc<
+                Mutex<HashMap<String, temm1e_tools::browser_session::InteractiveBrowseSession>>,
+            > = Arc::new(Mutex::new(HashMap::new()));
+
             // ── Usage store (shares same SQLite DB as memory) ────
             let usage_store: Arc<dyn temm1e_core::UsageStore> =
                 Arc::new(temm1e_memory::SqliteUsageStore::new(&memory_url).await?);
             tracing::info!("Usage store initialized");
+
+            // ── Vault (encrypted credential store) ───────────────
+            let vault: Option<Arc<dyn temm1e_core::Vault>> = match temm1e_vault::LocalVault::new()
+                .await
+            {
+                Ok(v) => {
+                    tracing::info!("Vault initialized");
+                    Some(Arc::new(v) as Arc<dyn temm1e_core::Vault>)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Vault initialization failed — browser authenticate disabled");
+                    None
+                }
+            };
 
             // ── Tools (with secret-censoring channel wrapper) ───
             let censored_channel: Option<Arc<dyn Channel>> = primary_channel
@@ -1372,6 +1433,24 @@ async fn main() -> Result<()> {
             > = Arc::new(tokio::sync::RwLock::new(
                 temm1e_core::types::config::MemoryStrategy::Lambda,
             ));
+            // Use create_tools_with_browser to get a separate BrowserTool reference
+            // for /browser command handling.
+            #[cfg(feature = "browser")]
+            let (mut tools, browser_tool_ref) = temm1e_tools::create_tools_with_browser(
+                &config.tools,
+                censored_channel.clone(),
+                Some(pending_messages.clone()),
+                Some(memory.clone()),
+                Some(Arc::new(setup_tokens.clone()) as Arc<dyn temm1e_core::SetupLinkGenerator>),
+                Some(usage_store.clone()),
+                if personality_locked {
+                    None
+                } else {
+                    Some(shared_mode.clone())
+                },
+                vault.clone(),
+            );
+            #[cfg(not(feature = "browser"))]
             let mut tools = temm1e_tools::create_tools(
                 &config.tools,
                 censored_channel,
@@ -1379,12 +1458,12 @@ async fn main() -> Result<()> {
                 Some(memory.clone()),
                 Some(Arc::new(setup_tokens.clone()) as Arc<dyn temm1e_core::SetupLinkGenerator>),
                 Some(usage_store.clone()),
-                // Don't register mode_switch tool when personality is locked (work/pro)
                 if personality_locked {
                     None
                 } else {
                     Some(shared_mode.clone())
                 },
+                vault.clone(),
             );
             tracing::info!(count = tools.len(), "Tools initialized");
 
@@ -1705,6 +1784,8 @@ async fn main() -> Result<()> {
                 let pending_clone = pending_messages.clone();
                 let setup_tokens_clone = setup_tokens.clone();
                 let pending_raw_keys_clone = pending_raw_keys.clone();
+                #[cfg(feature = "browser")]
+                let login_sessions_clone = login_sessions.clone();
                 let usage_store_clone = usage_store.clone();
                 let hive_clone = hive_instance.clone();
 
@@ -1913,6 +1994,12 @@ async fn main() -> Result<()> {
                             let shared_memory_strategy = shared_memory_strategy_for_worker;
                             let setup_tokens_worker = setup_tokens_clone.clone();
                             let pending_raw_keys_worker = pending_raw_keys_clone.clone();
+                            #[cfg(feature = "browser")]
+                            let login_sessions_worker = login_sessions_clone.clone();
+                            #[cfg(feature = "browser")]
+                            let vault_for_login = vault.clone();
+                            #[cfg(feature = "browser")]
+                            let browser_ref_worker = browser_tool_ref.clone();
                             let usage_store_worker = usage_store_clone.clone();
                             let hive_worker = hive_clone.clone();
                             let worker_chat_id = chat_id.clone();
@@ -2251,6 +2338,10 @@ Available commands:\n\n\
 /mcp add <name> <command-or-url> — Connect a new MCP server\n\
 /mcp remove <name> — Disconnect an MCP server\n\
 /mcp restart <name> — Restart an MCP server\n\
+/browser — Browser status, sessions, and lifecycle\n\
+/browser close — Save sessions and close browser\n\
+/browser sessions — List saved web sessions\n\
+/browser forget <service> — Delete a saved session\n\
 /reload — Hot-reload config and agent (admin)\n\
 /reset — Factory reset all local state (admin)\n\
 /restart — Restart TEMM1E process (admin)\n\n\
@@ -2546,6 +2637,279 @@ Just type a message to chat with the AI agent.",
                                         let reply = temm1e_core::types::message::OutboundMessage {
                                             chat_id: msg.chat_id.clone(),
                                             text: reload_result,
+                                            reply_to: Some(msg.id.clone()),
+                                            parse_mode: None,
+                                        };
+                                        send_with_retry(&*sender, reply).await;
+                                        is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                        return;
+                                    }
+
+                                    // /login <service> <url> — OTK Prowl interactive login session
+                                    #[cfg(feature = "browser")]
+                                    if cmd_lower.starts_with("/login ") || cmd_lower == "/login" {
+                                        let args = msg_text_cmd.trim().strip_prefix("/login").unwrap_or("").trim();
+                                        if args.is_empty() {
+                                            let reply = temm1e_core::types::message::OutboundMessage {
+                                                chat_id: msg.chat_id.clone(),
+                                                text: "Usage: /login <service>\nExamples:\n  /login facebook\n  /login github\n  /login https://mysite.com/login\n  /login myapp https://myapp.com/auth\n\n100+ services supported: facebook, google, github, slack, discord, amazon, netflix, spotify...".to_string(),
+                                                reply_to: Some(msg.id.clone()),
+                                                parse_mode: None,
+                                            };
+                                            send_with_retry(&*sender, reply).await;
+                                            is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                            return;
+                                        }
+
+                                        // Resolve service name → login URL using registry
+                                        let (service_name, login_url) = match temm1e_tools::prowl_blueprints::login_registry::resolve_login_args(args) {
+                                            Some((s, u)) => (s, u),
+                                            None => {
+                                                let reply = temm1e_core::types::message::OutboundMessage {
+                                                    chat_id: msg.chat_id.clone(),
+                                                    text: "Could not parse login target. Try: /login facebook".to_string(),
+                                                    reply_to: Some(msg.id.clone()),
+                                                    parse_mode: None,
+                                                };
+                                                send_with_retry(&*sender, reply).await;
+                                                is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                                return;
+                                            }
+                                        };
+
+                                        tracing::info!(
+                                            service = %service_name,
+                                            url = %login_url,
+                                            chat_id = %msg.chat_id,
+                                            "OTK Prowl login session starting"
+                                        );
+
+                                        // Launch browser and create session via convenience API
+                                        match temm1e_tools::browser_session::InteractiveBrowseSession::launch(
+                                            &service_name, &login_url
+                                        ).await {
+                                            Ok(mut session) => {
+                                                // Capture first annotated screenshot
+                                                match session.capture_annotated().await {
+                                                    Ok((_png, description)) => {
+                                                        let text = format!(
+                                                            "🔐 Login session for '{}'\n\n{}",
+                                                            service_name, description
+                                                        );
+                                                        let reply = temm1e_core::types::message::OutboundMessage {
+                                                            chat_id: msg.chat_id.clone(),
+                                                            text,
+                                                            reply_to: Some(msg.id.clone()),
+                                                            parse_mode: None,
+                                                        };
+                                                        send_with_retry(&*sender, reply).await;
+
+                                                        // Store session for this chat
+                                                        login_sessions_worker.lock().await.insert(
+                                                            msg.chat_id.clone(), session
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        let reply = temm1e_core::types::message::OutboundMessage {
+                                                            chat_id: msg.chat_id.clone(),
+                                                            text: format!("Failed to scan page: {}", e),
+                                                            reply_to: Some(msg.id.clone()),
+                                                            parse_mode: None,
+                                                        };
+                                                        send_with_retry(&*sender, reply).await;
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                let reply = temm1e_core::types::message::OutboundMessage {
+                                                    chat_id: msg.chat_id.clone(),
+                                                    text: format!("Login session failed: {}", e),
+                                                    reply_to: Some(msg.id.clone()),
+                                                    parse_mode: None,
+                                                };
+                                                send_with_retry(&*sender, reply).await;
+                                            }
+                                        }
+
+                                        is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                        return;
+                                    }
+
+                                    // ── Active login session interceptor ──────
+                                    // If this chat has an active login session, route messages there
+                                    // instead of the agent
+                                    #[cfg(feature = "browser")]
+                                    {
+                                        let has_session = login_sessions_worker.lock().await.contains_key(&msg.chat_id);
+                                        if has_session {
+                                            let input = msg_text_cmd.trim();
+                                            let mut sessions = login_sessions_worker.lock().await;
+                                            if let Some(session) = sessions.get_mut(&msg.chat_id) {
+                                                match session.handle_input(input).await {
+                                                    Ok(temm1e_tools::browser_session::SessionAction::Continue) => {
+                                                        // Re-capture and send updated page
+                                                        match session.capture_annotated().await {
+                                                            Ok((_png, description)) => {
+                                                                let reply = temm1e_core::types::message::OutboundMessage {
+                                                                    chat_id: msg.chat_id.clone(),
+                                                                    text: format!("✅ Done\n\n{}", description),
+                                                                    reply_to: Some(msg.id.clone()),
+                                                                    parse_mode: None,
+                                                                };
+                                                                send_with_retry(&*sender, reply).await;
+                                                            }
+                                                            Err(e) => {
+                                                                let reply = temm1e_core::types::message::OutboundMessage {
+                                                                    chat_id: msg.chat_id.clone(),
+                                                                    text: format!("Page scan error: {}", e),
+                                                                    reply_to: Some(msg.id.clone()),
+                                                                    parse_mode: None,
+                                                                };
+                                                                send_with_retry(&*sender, reply).await;
+                                                            }
+                                                        }
+                                                    }
+                                                    Ok(temm1e_tools::browser_session::SessionAction::Done) => {
+                                                        // Capture session to vault
+                                                        if let Some(ref v) = vault_for_login {
+                                                            match session.capture_session(v.as_ref()).await {
+                                                                Ok(()) => {
+                                                                    let svc = session.service().to_string();
+                                                                    sessions.remove(&msg.chat_id);
+                                                                    let reply = temm1e_core::types::message::OutboundMessage {
+                                                                        chat_id: msg.chat_id.clone(),
+                                                                        text: format!("🔒 Session for '{}' saved securely! I can now browse {} for you.", svc, svc),
+                                                                        reply_to: Some(msg.id.clone()),
+                                                                        parse_mode: None,
+                                                                    };
+                                                                    send_with_retry(&*sender, reply).await;
+                                                                }
+                                                                Err(e) => {
+                                                                    let reply = temm1e_core::types::message::OutboundMessage {
+                                                                        chat_id: msg.chat_id.clone(),
+                                                                        text: format!("Session save failed: {}", e),
+                                                                        reply_to: Some(msg.id.clone()),
+                                                                        parse_mode: None,
+                                                                    };
+                                                                    send_with_retry(&*sender, reply).await;
+                                                                }
+                                                            }
+                                                        } else {
+                                                            sessions.remove(&msg.chat_id);
+                                                            let reply = temm1e_core::types::message::OutboundMessage {
+                                                                chat_id: msg.chat_id.clone(),
+                                                                text: "Login complete but vault not available — session not saved.".to_string(),
+                                                                reply_to: Some(msg.id.clone()),
+                                                                parse_mode: None,
+                                                            };
+                                                            send_with_retry(&*sender, reply).await;
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        let reply = temm1e_core::types::message::OutboundMessage {
+                                                            chat_id: msg.chat_id.clone(),
+                                                            text: format!("⚠️ {}", e),
+                                                            reply_to: Some(msg.id.clone()),
+                                                            parse_mode: None,
+                                                        };
+                                                        send_with_retry(&*sender, reply).await;
+                                                    }
+                                                }
+                                            }
+                                            is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                            return;
+                                        }
+                                    }
+
+                                    // /browser — browser lifecycle management (V2)
+                                    #[cfg(feature = "browser")]
+                                    if cmd_lower == "/browser" || cmd_lower.starts_with("/browser ") {
+                                        let browser_args = if cmd_lower == "/browser" {
+                                            ""
+                                        } else {
+                                            msg_text_cmd.trim().strip_prefix("/browser").unwrap_or("").trim()
+                                        };
+                                        let browser_args_lower = browser_args.to_lowercase();
+
+                                        let response_text = if browser_args_lower.is_empty() || browser_args_lower == "status" {
+                                            // /browser or /browser status — report state
+                                            match &browser_ref_worker {
+                                                Some(bt) => {
+                                                    if bt.is_running() {
+                                                        let domains = bt.get_active_domains();
+                                                        let sessions_str = if domains.is_empty() {
+                                                            "none".to_string()
+                                                        } else {
+                                                            let mut sorted: Vec<_> = domains.into_iter().collect();
+                                                            sorted.sort();
+                                                            sorted.join(", ")
+                                                        };
+                                                        let uptime = bt.uptime().unwrap_or_else(|| "unknown".to_string());
+                                                        format!(
+                                                            "\u{1f310} Browser: Active\nSessions: {}\nUptime: {}",
+                                                            sessions_str, uptime
+                                                        )
+                                                    } else {
+                                                        "\u{1f310} Browser: Inactive. Will start on next web task.".to_string()
+                                                    }
+                                                }
+                                                None => "\u{1f310} Browser: Not configured.".to_string(),
+                                            }
+                                        } else if browser_args_lower == "close" {
+                                            // /browser close — auto-capture and close
+                                            match &browser_ref_worker {
+                                                Some(bt) => {
+                                                    let (msg, saved) = bt.close_with_capture().await;
+                                                    if saved.is_empty() {
+                                                        format!("\u{1f512} {}", msg)
+                                                    } else {
+                                                        format!(
+                                                            "\u{1f4be} Sessions saved: {}\n\u{1f512} {}",
+                                                            saved.join(", "), msg
+                                                        )
+                                                    }
+                                                }
+                                                None => "Browser not configured.".to_string(),
+                                            }
+                                        } else if browser_args_lower == "sessions" {
+                                            // /browser sessions — list saved vault sessions
+                                            match &browser_ref_worker {
+                                                Some(bt) => {
+                                                    let sessions = bt.list_saved_sessions().await;
+                                                    if sessions.is_empty() {
+                                                        "\u{1f4cb} No saved sessions.".to_string()
+                                                    } else {
+                                                        let mut lines = vec!["\u{1f4cb} Saved sessions:".to_string()];
+                                                        for (service, captured_at) in &sessions {
+                                                            let age = format_capture_age(captured_at);
+                                                            lines.push(format!("- {} (captured {})", service, age));
+                                                        }
+                                                        lines.join("\n")
+                                                    }
+                                                }
+                                                None => "Browser not configured.".to_string(),
+                                            }
+                                        } else if browser_args_lower.starts_with("forget ") {
+                                            // /browser forget <service>
+                                            let service = browser_args["forget ".len()..].trim();
+                                            if service.is_empty() {
+                                                "Usage: /browser forget <service>".to_string()
+                                            } else {
+                                                match &browser_ref_worker {
+                                                    Some(bt) => match bt.forget_session(service).await {
+                                                        Ok(()) => format!("\u{1f5d1}\u{fe0f} Session for '{}' deleted.", service),
+                                                        Err(e) => format!("Failed: {}", e),
+                                                    },
+                                                    None => "Browser not configured.".to_string(),
+                                                }
+                                            }
+                                        } else {
+                                            "Usage: /browser [status|close|sessions|forget <service>]".to_string()
+                                        };
+
+                                        let reply = temm1e_core::types::message::OutboundMessage {
+                                            chat_id: msg.chat_id.clone(),
+                                            text: response_text,
                                             reply_to: Some(msg.id.clone()),
                                             parse_mode: None,
                                         };
@@ -3163,14 +3527,35 @@ Just type a message to chat with the AI agent.",
                                                                 }
                                                             }
                                                         } else {
-                                                            tracing::info!("Alpha: decomposition failed or not worth it, no pack");
-                                                            let reply = temm1e_core::types::message::OutboundMessage {
-                                                                chat_id: msg.chat_id.clone(),
-                                                                text: "Task classified as complex but decomposition wasn't viable. Please try rephrasing or breaking it down.".into(),
-                                                                reply_to: Some(msg.id.clone()),
-                                                                parse_mode: None,
-                                                            };
-                                                            send_with_retry(&*sender, reply).await;
+                                                            // Decomposition wasn't viable — fall back to single-agent processing
+                                                            tracing::info!("Alpha: decomposition failed or not worth it, falling back to single-agent");
+                                                            let fallback_agent = Arc::new(temm1e_agent::AgentRuntime::with_limits(
+                                                                agent.provider_arc(),
+                                                                memory.clone(),
+                                                                tools_template.clone(),
+                                                                agent.model().to_string(),
+                                                                Some(build_system_prompt()),
+                                                                max_turns, max_ctx, max_rounds, max_task_duration, max_spend,
+                                                            ).with_v2_optimizations(v2_opt).with_parallel_phases(pp_opt).with_shared_mode(shared_mode.clone()).with_shared_memory_strategy(shared_memory_strategy.clone()));
+                                                            let fallback_cancel = cancel_token_clone.clone();
+                                                            match fallback_agent.process_message(&msg, &mut session, Some(interrupt_clone.clone()), Some(pending_for_worker.clone()), None, None, Some(fallback_cancel)).await {
+                                                                Ok((mut reply, _usage)) => {
+                                                                    reply.text = censor_secrets(&reply.text);
+                                                                    if !reply.text.trim().is_empty() {
+                                                                        send_with_retry(&*sender, reply).await;
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    tracing::error!(error = %e, "Single-agent fallback failed");
+                                                                    let reply = temm1e_core::types::message::OutboundMessage {
+                                                                        chat_id: msg.chat_id.clone(),
+                                                                        text: censor_secrets(&format_user_error(&e)),
+                                                                        reply_to: Some(msg.id.clone()),
+                                                                        parse_mode: None,
+                                                                    };
+                                                                    send_with_retry(&*sender, reply).await;
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -3737,6 +4122,20 @@ Just type a message to chat with the AI agent.",
             let usage_store: Arc<dyn temm1e_core::UsageStore> =
                 Arc::new(temm1e_memory::SqliteUsageStore::new(&memory_url).await?);
 
+            // ── Vault (encrypted credential store) ───────────────
+            let vault: Option<Arc<dyn temm1e_core::Vault>> = match temm1e_vault::LocalVault::new()
+                .await
+            {
+                Ok(v) => {
+                    tracing::info!("Vault initialized (CLI)");
+                    Some(Arc::new(v) as Arc<dyn temm1e_core::Vault>)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Vault initialization failed — browser authenticate disabled");
+                    None
+                }
+            };
+
             // ── Tools ──────────────────────────────────────────
             let pending_messages: temm1e_tools::PendingMessages =
                 Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
@@ -3750,6 +4149,18 @@ Just type a message to chat with the AI agent.",
             > = Arc::new(tokio::sync::RwLock::new(
                 temm1e_core::types::config::MemoryStrategy::Lambda,
             ));
+            #[cfg(feature = "browser")]
+            let (mut tools_template, cli_browser_ref) = temm1e_tools::create_tools_with_browser(
+                &config.tools,
+                Some(censored_cli),
+                Some(pending_messages.clone()),
+                Some(memory.clone()),
+                Some(Arc::new(setup_tokens.clone()) as Arc<dyn temm1e_core::SetupLinkGenerator>),
+                Some(usage_store.clone()),
+                Some(shared_mode.clone()),
+                vault.clone(),
+            );
+            #[cfg(not(feature = "browser"))]
             let mut tools_template = temm1e_tools::create_tools(
                 &config.tools,
                 Some(censored_cli),
@@ -3758,6 +4169,7 @@ Just type a message to chat with the AI agent.",
                 Some(Arc::new(setup_tokens.clone()) as Arc<dyn temm1e_core::SetupLinkGenerator>),
                 Some(usage_store.clone()),
                 Some(shared_mode.clone()),
+                vault.clone(),
             );
 
             // ── Custom script tools (user/agent-authored) ──────
@@ -4067,6 +4479,10 @@ Just type a message to chat with the AI agent.",
                          /mcp add <name> <command-or-url> — Connect a new MCP server\n\
                          /mcp remove <name> — Disconnect an MCP server\n\
                          /mcp restart <name> — Restart an MCP server\n\
+                         /browser — Browser status, sessions, and lifecycle\n\
+                         /browser close — Save sessions and close browser\n\
+                         /browser sessions — List saved web sessions\n\
+                         /browser forget <service> — Delete a saved session\n\
                          /quit — Exit the CLI chat\n\n\
                          Just type a message to chat with the AI agent.\n",
                         env!("CARGO_PKG_VERSION"),
@@ -4322,10 +4738,146 @@ Just type a message to chat with the AI agent.",
                     continue;
                 }
 
+                // /browser — browser lifecycle management (V2)
+                #[cfg(feature = "browser")]
+                if cmd_lower == "/browser" || cmd_lower.starts_with("/browser ") {
+                    let browser_args = if cmd_lower == "/browser" {
+                        ""
+                    } else {
+                        msg_text
+                            .trim()
+                            .strip_prefix("/browser")
+                            .unwrap_or("")
+                            .trim()
+                    };
+                    let browser_args_lower = browser_args.to_lowercase();
+
+                    if browser_args_lower.is_empty() || browser_args_lower == "status" {
+                        match &cli_browser_ref {
+                            Some(bt) => {
+                                if bt.is_running() {
+                                    let domains = bt.get_active_domains();
+                                    let sessions_str = if domains.is_empty() {
+                                        "none".to_string()
+                                    } else {
+                                        let mut sorted: Vec<_> = domains.into_iter().collect();
+                                        sorted.sort();
+                                        sorted.join(", ")
+                                    };
+                                    let uptime =
+                                        bt.uptime().unwrap_or_else(|| "unknown".to_string());
+                                    println!(
+                                        "\nBrowser: Active\nSessions: {}\nUptime: {}\n",
+                                        sessions_str, uptime
+                                    );
+                                } else {
+                                    println!("\nBrowser: Inactive. Will start on next web task.\n");
+                                }
+                            }
+                            None => println!("\nBrowser: Not configured.\n"),
+                        }
+                    } else if browser_args_lower == "close" {
+                        match &cli_browser_ref {
+                            Some(bt) => {
+                                let (msg, saved) = bt.close_with_capture().await;
+                                if !saved.is_empty() {
+                                    println!("\nSessions saved: {}", saved.join(", "));
+                                }
+                                println!("{}\n", msg);
+                            }
+                            None => println!("\nBrowser not configured.\n"),
+                        }
+                    } else if browser_args_lower == "sessions" {
+                        match &cli_browser_ref {
+                            Some(bt) => {
+                                let sessions = bt.list_saved_sessions().await;
+                                if sessions.is_empty() {
+                                    println!("\nNo saved sessions.\n");
+                                } else {
+                                    println!("\nSaved sessions:");
+                                    for (service, captured_at) in &sessions {
+                                        let age = format_capture_age(captured_at);
+                                        println!("  - {} (captured {})", service, age);
+                                    }
+                                    println!();
+                                }
+                            }
+                            None => println!("\nBrowser not configured.\n"),
+                        }
+                    } else if browser_args_lower.starts_with("forget ") {
+                        let service = browser_args["forget ".len()..].trim();
+                        if service.is_empty() {
+                            println!("\nUsage: /browser forget <service>\n");
+                        } else {
+                            match &cli_browser_ref {
+                                Some(bt) => match bt.forget_session(service).await {
+                                    Ok(()) => println!("\nSession for \'{}\' deleted.\n", service),
+                                    Err(e) => println!("\nFailed: {}\n", e),
+                                },
+                                None => println!("\nBrowser not configured.\n"),
+                            }
+                        }
+                    } else {
+                        println!("\nUsage: /browser [status|close|sessions|forget <service>]\n");
+                    }
+                    eprint!("temm1e> ");
+                    continue;
+                }
+
                 // /restart — not applicable in CLI mode
                 if cmd_lower == "/restart" {
                     println!("\n/restart is only available in server mode (temm1e start).");
                     println!("In CLI mode, just exit and re-run: temm1e chat\n");
+                    eprint!("temm1e> ");
+                    continue;
+                }
+
+                // /login <service> <url> — interactive OTK browser login session
+                #[cfg(feature = "browser")]
+                if cmd_lower.starts_with("/login ") {
+                    let login_args = msg_text.trim()["/login".len()..].trim();
+                    let parts: Vec<&str> = login_args.splitn(2, ' ').collect();
+                    if parts.len() < 2 || parts[1].trim().is_empty() {
+                        println!(
+                            "\nUsage: /login <service> <url>\n\n\
+                             Start an interactive browser login session.\n\
+                             You'll see numbered interactive elements — type a number to click,\n\
+                             type text to fill a focused field, or type 'done' to finish.\n\n\
+                             Example: /login github https://github.com/login\n"
+                        );
+                    } else {
+                        let service = parts[0];
+                        let url = parts[1].trim();
+                        match &vault {
+                            None => {
+                                println!(
+                                    "\nVault not available — cannot store session credentials.\n"
+                                );
+                            }
+                            Some(vault_ref) => {
+                                println!(
+                                    "\nStarting interactive login for '{}' at {}\n\
+                                     Launching browser...\n",
+                                    service, url
+                                );
+                                // Launch browser and create session
+                                match temm1e_tools::browser_session_login(
+                                    service,
+                                    url,
+                                    vault_ref.as_ref(),
+                                )
+                                .await
+                                {
+                                    Ok(summary) => {
+                                        println!("\n{}\n", summary);
+                                    }
+                                    Err(e) => {
+                                        println!("\nLogin session failed: {}\n", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
                     eprint!("temm1e> ");
                     continue;
                 }

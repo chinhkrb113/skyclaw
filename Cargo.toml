@@ -73,6 +73,7 @@ tracing-opentelemetry = "0.28"
 
 # Browser
 chromiumoxide = { version = "0.7", features = ["tokio-runtime"] }
+htmd = "0.5"
 
 # Object storage
 aws-sdk-s3 = "1"

@@ -148,11 +148,13 @@ I create **Blueprints** — structured, replayable recipes with exact commands, 
 <tr>
 <td width="50%" valign="top">
 
-#### :eye: Vision Browser
+#### :eye: Vision Browser + Tem Prowl
 
 I see websites the way you do. Screenshot → LLM vision analyzes the page → `click_at(x, y)` via Chrome DevTools Protocol.
 
 Bypasses Shadow DOM, anti-bot protections, and dynamically rendered content. Works headless on a $5 VPS. No Selenium. No Playwright. Pure CDP.
+
+**Tem Prowl** adds `/login` for 100+ services, OTK credential isolation, and swarm browsing.
 
 </td>
 <td width="50%" valign="top">
@@ -257,6 +259,32 @@ Every LLM call is a training example being thrown away. Eigen-Tune captures them
 
 [Research paper →](tems_lab/eigen/RESEARCH_PAPER.md) · [Design doc →](tems_lab/eigen/DESIGN.md) · [Full lab →](tems_lab/eigen/)
 
+### Tem Prowl — Web-Native Browsing with OTK Authentication
+
+The web is where humans live. Tem Prowl is a messaging-first web agent architecture — I browse websites autonomously behind a chat interface and report structured results back through messages. No live viewport. No shoulder-surfing. Just results.
+
+**Key capabilities:**
+
+- **Layered observation** — accessibility tree first (`O(d * log c)` token cost), targeted DOM extraction second, selective screenshots only when needed. 3-10x cheaper than screenshot-based agents.
+- **`/login` command** — 100+ pre-registered services. Say `/login facebook` or `/login github` and I open an OTK (one-time key) browser session where you log in via an annotated screenshot flow. Your credentials go directly into the page via CDP — the LLM never sees them.
+- **`/browser` command** — persistent browser session. Open a browser, navigate pages, interact with elements, and keep the session alive across messages. Headed or headless mode with automatic fallback.
+- **Cloned profile architecture** — clone your real Chrome profile (cookies, localStorage, sessionStorage) for zero-login web automation. Sites see your actual session data. Works on macOS, Windows, and Linux. Breakthrough: Zalo Web and other anti-bot-hardened sites that defeat all other headless/headed approaches now work.
+- **QR code auto-detection** — automatically detects QR codes on login pages and sends them to you via Telegram for scanning (WeChat, Zalo, LINE, etc.).
+- **Credential isolation** — passwords are `Zeroize`-on-drop, session cookies are encrypted at rest via ChaCha20-Poly1305 vault, and a credential scrubber strips sensitive data from all browser observations before they enter the LLM context.
+- **Session persistence** — authenticated sessions are saved and restored across restarts. Log in once, stay logged in.
+- **Headed/headless fallback** — tries headed Chrome first (better anti-bot resilience), falls back to headless if no display is available (VPS mode).
+- **Swarm browsing** — extends Many Tems to parallel browser operation. N browsers coordinated through pheromone signals with zero LLM coordination tokens.
+
+**Usage:**
+```
+/login facebook          Log into Facebook via OTK session
+/login github            Log into GitHub via OTK session
+/login https://custom-site.com/auth   Log into any site by URL
+/browser                 Open a persistent browser session
+```
+
+[Research paper →](tems_lab/TEM_PROWL_PAPER.md) · [Full lab →](tems_lab/prowl/)
+
 ---
 
 ## Interactive TUI
@@ -331,9 +359,9 @@ Paste any API key in Telegram — I detect the provider automatically:
 </td>
 <td width="50%" valign="top">
 
-**13 Built-in Tools**
+**14 Built-in Tools**
 
-Shell, stealth browser (vision click_at), file read/write/list, web fetch, git, send_message, send_file, memory CRUD, λ-recall, key management, MCP management, self-extend, self-create tool
+Shell, stealth browser (vision click_at), Prowl login (OTK session capture), persistent browser (/browser), file read/write/list, web fetch, git, send_message, send_file, memory CRUD, λ-recall, key management, MCP management, self-extend, self-create tool
 
 **14 MCP Servers** in the registry — discovered and installed at runtime
 
@@ -362,7 +390,7 @@ temm1e (binary)
 ├─ temm1e-channels       Telegram, Discord, Slack, CLI
 ├─ temm1e-memory         SQLite + Markdown + λ-Memory with automatic failover
 ├─ temm1e-vault          ChaCha20-Poly1305 encrypted secrets
-├─ temm1e-tools          Shell, browser, file ops, web fetch, git, λ-recall
+├─ temm1e-tools          Shell, browser, Prowl (login + observe), file ops, web fetch, git, λ-recall
 ├─ temm1e-mcp            MCP client — stdio + HTTP, 14-server registry
 ├─ temm1e-gateway        HTTP server, health, dashboard, OAuth identity
 ├─ temm1e-skills         Skill registry (TemHub v1)
@@ -398,7 +426,7 @@ temm1e (binary)
 <td align="center"><strong>9.6 MB</strong><br><sub>Binary size</sub></td>
 <td align="center"><strong>1,638</strong><br><sub>Tests</sub></td>
 <td align="center"><strong>8</strong><br><sub>AI Providers</sub></td>
-<td align="center"><strong>14</strong><br><sub>Built-in tools</sub></td>
+<td align="center"><strong>15</strong><br><sub>Built-in tools</sub></td>
 <td align="center"><strong>5</strong><br><sub>Channels</sub></td>
 </tr>
 </table>
@@ -466,6 +494,7 @@ temm1e reset --confirm       Factory reset with backup
 /mcp                 List connected MCP servers
 /mcp add <name> <cmd>  Connect a new MCP server
 /eigentune           Self-tuning status and control
+/login <service>     OTK browser login (100+ services or custom URL)
 ```
 
 ---

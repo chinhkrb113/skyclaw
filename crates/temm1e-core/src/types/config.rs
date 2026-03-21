@@ -542,8 +542,8 @@ pub struct ToolsConfig {
     pub cron: bool,
     #[serde(default = "default_true")]
     pub http: bool,
-    /// Browser idle timeout in seconds before auto-close (default: 300).
-    /// Increased from 120s to support authenticated sessions that take longer.
+    /// Browser idle timeout in seconds. 0 = disabled (persistent browser, V2 default).
+    /// If >0, auto-closes after this many seconds of inactivity (legacy behavior).
     #[serde(default = "default_browser_timeout_secs")]
     pub browser_timeout_secs: u64,
 }
@@ -557,13 +557,13 @@ impl Default for ToolsConfig {
             git: true,
             cron: true,
             http: true,
-            browser_timeout_secs: 300,
+            browser_timeout_secs: 0,
         }
     }
 }
 
 fn default_browser_timeout_secs() -> u64 {
-    300
+    0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1039,14 +1039,14 @@ mod tests {
     // ── Browser timeout config tests ─────────────────────────────────
 
     #[test]
-    fn browser_timeout_secs_default_is_300() {
+    fn browser_timeout_secs_default_is_zero_persistent() {
         let tools = ToolsConfig::default();
-        assert_eq!(tools.browser_timeout_secs, 300);
+        assert_eq!(tools.browser_timeout_secs, 0);
     }
 
     #[test]
     fn browser_timeout_secs_deserialize_default() {
-        // When browser_timeout_secs is not specified, it should default to 300
+        // When browser_timeout_secs is not specified, it should default to 0 (persistent)
         let toml_str = r#"
             shell = true
             browser = true
@@ -1056,7 +1056,7 @@ mod tests {
             http = true
         "#;
         let config: ToolsConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.browser_timeout_secs, 300);
+        assert_eq!(config.browser_timeout_secs, 0);
     }
 
     #[test]
@@ -1103,9 +1103,9 @@ mod tests {
 
     #[test]
     fn browser_timeout_secs_default_in_full_config() {
-        // Full config with no tools section should default to 300
+        // Full config with no tools section should default to 0 (persistent browser)
         let config = Temm1eConfig::default();
-        assert_eq!(config.tools.browser_timeout_secs, 300);
+        assert_eq!(config.tools.browser_timeout_secs, 0);
     }
 
     #[test]
