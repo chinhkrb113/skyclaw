@@ -211,7 +211,11 @@ impl DiscordChannel {
             }
         };
         if list.is_empty() {
-            return false; // No one whitelisted yet
+            return false; // No one whitelisted yet (DF-16)
+        }
+        // Wildcard: "*" means everyone is allowed
+        if list.iter().any(|a| a == "*") {
+            return true;
         }
         list.iter().any(|a| a == user_id)
     }
@@ -339,8 +343,20 @@ impl Channel for DiscordChannel {
 
         // Discord has a 2000 character message limit. Split if needed.
         let chunks = split_message(&text, 2000);
-        for chunk in chunks {
-            let builder = CreateMessage::new().content(chunk);
+        for (i, chunk) in chunks.iter().enumerate() {
+            let mut builder = CreateMessage::new().content(chunk);
+
+            // Reply to the original message (first chunk only — Discord allows
+            // one reply reference per message)
+            if i == 0 {
+                if let Some(ref reply_id) = msg.reply_to {
+                    if let Ok(mid) = reply_id.parse::<u64>() {
+                        builder = builder
+                            .reference_message((channel_id, serenity::all::MessageId::new(mid)));
+                    }
+                }
+            }
+
             channel_id.send_message(&http, builder).await.map_err(|e| {
                 Temm1eError::Channel(format!("Failed to send Discord message: {e}"))
             })?;
@@ -653,7 +669,7 @@ impl EventHandler for DiscordHandler {
                     poisoned.into_inner()
                 }
             };
-            if !list.iter().any(|a| a == &user_id) {
+            if !list.iter().any(|a| a == &user_id || a == "*") {
                 drop(list);
                 tracing::warn!(
                     user_id = %user_id,
@@ -1043,6 +1059,36 @@ mod tests {
         // Empty allowlist = deny all (DF-16)
         assert!(!channel.is_allowed("123456789"));
         assert!(!channel.is_allowed("anyone"));
+    }
+
+    #[test]
+    fn discord_wildcard_allowlist_allows_all() {
+        let config = ChannelConfig {
+            enabled: true,
+            token: Some("test-token".to_string()),
+            allowlist: vec!["*".to_string()],
+            file_transfer: true,
+            max_file_size: None,
+        };
+        let channel = DiscordChannel::new(&config).unwrap();
+        assert!(channel.is_allowed("123456789"));
+        assert!(channel.is_allowed("999888777"));
+        assert!(channel.is_allowed("anyone"));
+    }
+
+    #[test]
+    fn discord_wildcard_with_other_entries() {
+        let config = ChannelConfig {
+            enabled: true,
+            token: Some("test-token".to_string()),
+            allowlist: vec!["*".to_string(), "111222333".to_string()],
+            file_transfer: true,
+            max_file_size: None,
+        };
+        let channel = DiscordChannel::new(&config).unwrap();
+        // Wildcard overrides — everyone allowed
+        assert!(channel.is_allowed("999888777"));
+        assert!(channel.is_allowed("111222333"));
     }
 
     #[test]

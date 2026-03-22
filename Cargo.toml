@@ -173,7 +173,7 @@ futures.workspace = true
 tokio-util.workspace = true
 
 [features]
-default = ["telegram", "browser", "mcp", "codex-oauth"]
+default = ["telegram", "discord", "browser", "mcp", "codex-oauth"]
 telegram = ["temm1e-channels/telegram"]
 discord = ["temm1e-channels/discord"]
 slack = ["temm1e-channels/slack"]

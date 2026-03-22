@@ -1347,8 +1347,9 @@ async fn main() -> Result<()> {
             );
             tracing::info!(backend = %config.memory.backend, "Memory initialized");
 
-            // ── Telegram channel ───────────────────────────────
+            // ── Messaging channels ────────────────────────────────
             let mut channels: Vec<Arc<dyn temm1e_core::Channel>> = Vec::new();
+            let mut channel_map: HashMap<String, Arc<dyn temm1e_core::Channel>> = HashMap::new();
             let mut primary_channel: Option<Arc<dyn temm1e_core::Channel>> = None;
             let mut tg_rx: Option<
                 tokio::sync::mpsc::Receiver<temm1e_core::types::message::InboundMessage>,
@@ -1381,10 +1382,67 @@ async fn main() -> Result<()> {
                     tg_rx = tg.take_receiver();
                     let tg_arc: Arc<dyn temm1e_core::Channel> = Arc::new(tg);
                     channels.push(tg_arc.clone());
+                    channel_map.insert("telegram".to_string(), tg_arc.clone());
                     primary_channel = Some(tg_arc.clone());
                     tracing::info!("Telegram channel started");
                 }
             }
+
+            // ── Discord channel ───────────────────────────────
+            #[cfg(feature = "discord")]
+            let mut discord_rx: Option<
+                tokio::sync::mpsc::Receiver<temm1e_core::types::message::InboundMessage>,
+            > = None;
+
+            #[cfg(feature = "discord")]
+            {
+                // Auto-inject Discord config from env var when no config entry exists.
+                // Mirrors the Telegram zero-config pattern.
+                if !config.channel.contains_key("discord") {
+                    if let Ok(token) = std::env::var("DISCORD_BOT_TOKEN") {
+                        if !token.is_empty() {
+                            config.channel.insert(
+                                "discord".to_string(),
+                                temm1e_core::types::config::ChannelConfig {
+                                    enabled: true,
+                                    token: Some(token),
+                                    allowlist: vec![],
+                                    file_transfer: true,
+                                    max_file_size: None,
+                                },
+                            );
+                            tracing::info!(
+                                "Auto-configured Discord from DISCORD_BOT_TOKEN env var"
+                            );
+                        }
+                    }
+                }
+
+                if let Some(discord_config) = config.channel.get("discord") {
+                    if discord_config.enabled {
+                        let mut discord = temm1e_channels::DiscordChannel::new(discord_config)?;
+                        discord.start().await?;
+                        discord_rx = discord.take_receiver();
+                        let discord_arc: Arc<dyn temm1e_core::Channel> = Arc::new(discord);
+                        channels.push(discord_arc.clone());
+                        channel_map.insert("discord".to_string(), discord_arc.clone());
+                        if primary_channel.is_none() {
+                            primary_channel = Some(discord_arc.clone());
+                        }
+                        tracing::info!("Discord channel started");
+                    }
+                }
+            }
+
+            // ── Channel map zero-channels guard ──────────────────
+            if channel_map.is_empty() {
+                tracing::warn!(
+                    "No messaging channels configured. Set TELEGRAM_BOT_TOKEN or DISCORD_BOT_TOKEN, \
+                     or add [channel.telegram] / [channel.discord] to config."
+                );
+            }
+            let channel_map: Arc<HashMap<String, Arc<dyn temm1e_core::Channel>>> =
+                Arc::new(channel_map);
 
             // ── Pending messages ───────────────────────────────
             let pending_messages: temm1e_tools::PendingMessages =
@@ -1671,6 +1729,19 @@ async fn main() -> Result<()> {
                 }));
             }
 
+            // Wire Discord messages into the unified channel
+            #[cfg(feature = "discord")]
+            if let Some(mut discord_rx) = discord_rx {
+                let tx = msg_tx.clone();
+                task_handles.push(tokio::spawn(async move {
+                    while let Some(msg) = discord_rx.recv().await {
+                        if tx.send(msg).await.is_err() {
+                            break;
+                        }
+                    }
+                }));
+            }
+
             // ── Workspace ──────────────────────────────────────
             let workspace_path = dirs::home_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
@@ -1765,7 +1836,9 @@ async fn main() -> Result<()> {
                 cancel_token: tokio_util::sync::CancellationToken,
             }
 
-            if let Some(sender) = primary_channel.clone() {
+            if !channel_map.is_empty() {
+                let channel_map_arc = channel_map.clone();
+                let primary_fallback = primary_channel.clone();
                 let agent_state_clone = agent_state.clone();
                 let memory_clone = memory.clone();
                 let tools_clone = tools.clone();
@@ -1846,7 +1919,11 @@ async fn main() -> Result<()> {
                                     }
                                     // LLM interceptor — runs on a separate task.
                                     // Can chat, give status, or cancel the active task.
-                                    let icpt_sender = sender.clone();
+                                    let icpt_sender = channel_map_arc
+                                        .get(&inbound.channel)
+                                        .cloned()
+                                        .or_else(|| primary_fallback.clone())
+                                        .expect("channel_map is non-empty, checked at gate");
                                     let icpt_chat_id = chat_id.clone();
                                     let icpt_msg_id = inbound.id.clone();
                                     let icpt_msg_text = inbound.text.clone().unwrap_or_default();
@@ -1984,7 +2061,8 @@ async fn main() -> Result<()> {
                             let pp_opt = agent_parallel_phases;
                             let hive_on = hive_enabled_flag;
                             let base_url = provider_base_url.clone();
-                            let sender = sender.clone();
+                            let channel_map_worker = channel_map_arc.clone();
+                            let primary_fallback_worker = primary_fallback.clone();
                             let workspace_path = ws_path.clone();
                             let interrupt_clone = interrupt.clone();
                             let is_heartbeat_clone = is_heartbeat.clone();
@@ -2041,6 +2119,13 @@ async fn main() -> Result<()> {
                                     };
 
                                 while let Some(mut msg) = chat_rx.recv().await {
+                                    // Resolve sender per-message from channel map
+                                    let sender: Arc<dyn temm1e_core::Channel> = channel_map_worker
+                                        .get(&msg.channel)
+                                        .cloned()
+                                        .or_else(|| primary_fallback_worker.clone())
+                                        .expect("channel_map is non-empty, checked at gate");
+
                                     // Snapshot for outer panic handler (msg is borrowed by async block)
                                     let panic_chat_id = msg.chat_id.clone();
                                     let panic_msg_id = msg.id.clone();
@@ -2318,6 +2403,57 @@ async fn main() -> Result<()> {
                                         return;
                                     }
 
+                                    // /timelimit [seconds] — view or set hive task time limit
+                                    if cmd_lower == "/timelimit"
+                                        || cmd_lower.starts_with("/timelimit ")
+                                    {
+                                        let args = if cmd_lower == "/timelimit" {
+                                            ""
+                                        } else {
+                                            msg_text_cmd.trim()["/timelimit".len()..].trim()
+                                        };
+                                        let response = if args.is_empty() {
+                                            // Show current limit
+                                            if let Some(ref hive) = hive_worker {
+                                                let secs = hive.max_task_duration_secs();
+                                                format!(
+                                                    "Current task time limit: {}s ({}m {}s)",
+                                                    secs,
+                                                    secs / 60,
+                                                    secs % 60
+                                                )
+                                            } else {
+                                                "Hive (swarm) is not enabled.".to_string()
+                                            }
+                                        } else if let Ok(secs) = args.parse::<u64>() {
+                                            if secs < 30 {
+                                                "Time limit must be at least 30 seconds.".to_string()
+                                            } else if let Some(ref hive) = hive_worker {
+                                                hive.set_max_task_duration_secs(secs);
+                                                format!(
+                                                    "Task time limit set to {}s ({}m {}s)",
+                                                    secs,
+                                                    secs / 60,
+                                                    secs % 60
+                                                )
+                                            } else {
+                                                "Hive (swarm) is not enabled.".to_string()
+                                            }
+                                        } else {
+                                            "Usage: /timelimit [seconds]\nExample: /timelimit 1800"
+                                                .to_string()
+                                        };
+                                        let reply = temm1e_core::types::message::OutboundMessage {
+                                            chat_id: msg.chat_id.clone(),
+                                            text: response,
+                                            reply_to: Some(msg.id.clone()),
+                                            parse_mode: None,
+                                        };
+                                        send_with_retry(&*sender, reply).await;
+                                        is_busy_clone.store(false, Ordering::Relaxed);
+                                        return;
+                                    }
+
                                     // /help — list available commands
                                     if cmd_lower == "/help" {
                                         let help_text = format!("\
@@ -2342,6 +2478,8 @@ Available commands:\n\n\
 /browser close — Save sessions and close browser\n\
 /browser sessions — List saved web sessions\n\
 /browser forget <service> — Delete a saved session\n\
+/timelimit — Show current task time limit\n\
+/timelimit <seconds> — Set task time limit (e.g. /timelimit 1800)\n\
 /reload — Hot-reload config and agent (admin)\n\
 /reset — Factory reset all local state (admin)\n\
 /restart — Restart TEMM1E process (admin)\n\n\
@@ -4012,7 +4150,15 @@ Just type a message to chat with the AI agent.",
                     config.gateway.host, config.gateway.port
                 );
             } else {
-                println!("  Status: Onboarding — send your API key via Telegram");
+                let channel_names: Vec<&str> = channel_map.keys().map(|s| s.as_str()).collect();
+                if channel_names.is_empty() {
+                    println!("  Status: No channels configured — set TELEGRAM_BOT_TOKEN or DISCORD_BOT_TOKEN");
+                } else {
+                    println!(
+                        "  Status: Onboarding — send your API key via {}",
+                        channel_names.join(" or ")
+                    );
+                }
             }
 
             // Block until Ctrl+C, then drain gracefully

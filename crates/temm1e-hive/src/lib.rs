@@ -33,6 +33,7 @@ pub mod selection;
 pub mod types;
 pub mod worker;
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -62,6 +63,8 @@ pub struct Hive {
     pheromones: Arc<PheromoneField>,
     queen: Queen,
     config: HiveConfig,
+    /// Runtime-overridable task duration limit (seconds). 0 = use config default.
+    task_duration_override: AtomicU64,
 }
 
 impl Hive {
@@ -82,7 +85,25 @@ impl Hive {
             pheromones,
             queen,
             config: config.clone(),
+            task_duration_override: AtomicU64::new(0),
         })
+    }
+
+    /// Set the maximum wall-clock seconds a single hive task may run.
+    /// This override takes effect on the next task dispatch (lock-free).
+    pub fn set_max_task_duration_secs(&self, secs: u64) {
+        self.task_duration_override.store(secs, Ordering::Relaxed);
+    }
+
+    /// Get the effective maximum task duration in seconds.
+    /// Returns the runtime override if set, otherwise the config default.
+    pub fn max_task_duration_secs(&self) -> u64 {
+        let v = self.task_duration_override.load(Ordering::Relaxed);
+        if v > 0 {
+            v
+        } else {
+            self.config.blocker.max_task_duration_secs
+        }
     }
 
     /// Attempt to decompose a message into a swarm-executable order.
@@ -282,7 +303,12 @@ impl Hive {
 
         for i in 0..worker_count {
             let worker_id = format!("w{}", i + 1);
-            let config = self.config.clone();
+            let mut config = self.config.clone();
+            // Apply runtime override if set
+            let duration_override = self.task_duration_override.load(Ordering::Relaxed);
+            if duration_override > 0 {
+                config.blocker.max_task_duration_secs = duration_override;
+            }
             let blackboard = self.blackboard.clone();
             let pheromones = Arc::clone(&self.pheromones);
             let selector = TaskSelector::new(&self.config.selection);
