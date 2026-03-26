@@ -10,6 +10,8 @@ description = "Messaging channel integrations for TEMM1E"
 telegram = ["dep:teloxide", "dep:reqwest"]
 discord = ["dep:serenity", "dep:poise", "dep:reqwest"]
 slack = ["dep:reqwest"]
+whatsapp = ["dep:reqwest", "dep:hmac", "dep:sha2", "dep:hex"]
+whatsapp-web = ["dep:wa-rs", "dep:wa-rs-core", "dep:wa-rs-binary", "dep:wa-rs-sqlite-storage", "dep:wa-rs-tokio-transport", "dep:wa-rs-ureq-http", "dep:qrcode"]
 
 [dependencies]
 temm1e-core.workspace = true
@@ -35,6 +37,20 @@ poise = { workspace = true, optional = true }
 
 # Optional: Slack (also used by Telegram for file downloads)
 reqwest = { workspace = true, optional = true, features = ["multipart"] }
+
+# Optional: WhatsApp Cloud API (webhook signature validation)
+hmac = { version = "0.12", optional = true }
+sha2 = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
+
+# Optional: WhatsApp Web (unofficial protocol via wa-rs, stable Rust fork)
+wa-rs = { workspace = true, optional = true }
+wa-rs-core = { workspace = true, optional = true }
+wa-rs-binary = { workspace = true, optional = true }
+wa-rs-sqlite-storage = { workspace = true, optional = true }
+wa-rs-tokio-transport = { workspace = true, optional = true }
+wa-rs-ureq-http = { workspace = true, optional = true }
+qrcode = { workspace = true, optional = true }
 
 [dev-dependencies]
 temm1e-test-utils.workspace = true

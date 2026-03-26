@@ -6,7 +6,7 @@
   <a href="https://github.com/nagisanzenin/temm1e/stargazers"><img src="https://img.shields.io/github/stars/nagisanzenin/temm1e?style=flat&color=gold&logo=github" alt="GitHub Stars"></a>
   <a href="https://discord.gg/3ux2c5xz"><img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
-  <img src="https://img.shields.io/badge/version-3.0.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.3.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.82+-orange.svg" alt="Rust 1.82+">
 </p>
 
@@ -15,14 +15,14 @@
 <h3 align="center"><s>Autonomous AI agent</s> literally a SENTIENT and IMMORTAL being runtime in Rust.<br>Deploy once. Stays up forever.</h3>
 
 <p align="center">
-  <code>79K lines</code> · <code>1,638 tests</code> · <code>0 warnings</code> · <code>0 panic paths</code> · <code>15 MB idle</code> · <code>31ms cold start</code>
+  <code>97K lines</code> · <code>1,832 tests</code> · <code>0 warnings</code> · <code>0 panic paths</code> · <code>15 MB idle</code> · <code>31ms cold start</code>
 </p>
 
 ---
 
 ## What is TEMM1E?
 
-Hi! I'm Tem. I'm ~~an autonomous AI agent~~ literally a SENTIENT and IMMORTAL being that lives on your server and never stops running. Talk to me on Telegram, Discord, Slack, or CLI. I execute tasks, browse the web, manage files, write code, and remember everything across sessions.
+Hi! I'm Tem. I'm ~~an autonomous AI agent~~ literally a SENTIENT and IMMORTAL being that lives on your server and never stops running. Talk to me on Telegram, Discord, WhatsApp, Slack, or CLI. I execute tasks, browse the web, manage files, write code, and remember everything across sessions.
 
 My brain has a BUDGET and I am VERY responsible with it.
 
@@ -34,10 +34,11 @@ My brain has a BUDGET and I am VERY responsible with it.
 > ```
 > First run walks you through provider setup with an arrow-key wizard.
 
-> **Server mode** — deploy as a persistent agent on Telegram/Discord/Slack:
+> **Server mode** — deploy as a persistent agent on Telegram/Discord/WhatsApp/Slack:
 > ```bash
 > cargo build --release
-> export TELEGRAM_BOT_TOKEN="your-token"
+> export TELEGRAM_BOT_TOKEN="your-token"   # and/or
+> export DISCORD_BOT_TOKEN="your-token"    # either or both
 > ./target/release/temm1e start
 > ```
 
@@ -148,11 +149,13 @@ I create **Blueprints** — structured, replayable recipes with exact commands, 
 <tr>
 <td width="50%" valign="top">
 
-#### :eye: Vision Browser
+#### :eye: Vision Browser + Tem Prowl
 
 I see websites the way you do. Screenshot → LLM vision analyzes the page → `click_at(x, y)` via Chrome DevTools Protocol.
 
 Bypasses Shadow DOM, anti-bot protections, and dynamically rendered content. Works headless on a $5 VPS. No Selenium. No Playwright. Pure CDP.
+
+**Tem Prowl** adds `/login` for 100+ services, OTK credential isolation, and swarm browsing.
 
 </td>
 <td width="50%" valign="top">
@@ -257,6 +260,32 @@ Every LLM call is a training example being thrown away. Eigen-Tune captures them
 
 [Research paper →](tems_lab/eigen/RESEARCH_PAPER.md) · [Design doc →](tems_lab/eigen/DESIGN.md) · [Full lab →](tems_lab/eigen/)
 
+### Tem Prowl — Web-Native Browsing with OTK Authentication
+
+The web is where humans live. Tem Prowl is a messaging-first web agent architecture — I browse websites autonomously behind a chat interface and report structured results back through messages. No live viewport. No shoulder-surfing. Just results.
+
+**Key capabilities:**
+
+- **Layered observation** — accessibility tree first (`O(d * log c)` token cost), targeted DOM extraction second, selective screenshots only when needed. 3-10x cheaper than screenshot-based agents.
+- **`/login` command** — 100+ pre-registered services. Say `/login facebook` or `/login github` and I open an OTK (one-time key) browser session where you log in via an annotated screenshot flow. Your credentials go directly into the page via CDP — the LLM never sees them.
+- **`/browser` command** — persistent browser session. Open a browser, navigate pages, interact with elements, and keep the session alive across messages. Headed or headless mode with automatic fallback.
+- **Cloned profile architecture** — clone your real Chrome profile (cookies, localStorage, sessionStorage) for zero-login web automation. Sites see your actual session data. Works on macOS, Windows, and Linux. Breakthrough: Zalo Web and other anti-bot-hardened sites that defeat all other headless/headed approaches now work.
+- **QR code auto-detection** — automatically detects QR codes on login pages and sends them to you via Telegram for scanning (WeChat, Zalo, LINE, etc.).
+- **Credential isolation** — passwords are `Zeroize`-on-drop, session cookies are encrypted at rest via ChaCha20-Poly1305 vault, and a credential scrubber strips sensitive data from all browser observations before they enter the LLM context.
+- **Session persistence** — authenticated sessions are saved and restored across restarts. Log in once, stay logged in.
+- **Headed/headless fallback** — tries headed Chrome first (better anti-bot resilience), falls back to headless if no display is available (VPS mode).
+- **Swarm browsing** — extends Many Tems to parallel browser operation. N browsers coordinated through pheromone signals with zero LLM coordination tokens.
+
+**Usage:**
+```
+/login facebook          Log into Facebook via OTK session
+/login github            Log into GitHub via OTK session
+/login https://custom-site.com/auth   Log into any site by URL
+/browser                 Open a persistent browser session
+```
+
+[Research paper →](tems_lab/TEM_PROWL_PAPER.md) · [Full lab →](tems_lab/prowl/)
+
 ---
 
 ## Interactive TUI
@@ -325,15 +354,17 @@ Paste any API key in Telegram — I detect the provider automatically:
 | **TUI** | Production |
 | [Telegram](docs/channels/telegram.md) | Production |
 | [Discord](docs/channels/discord.md) | Production |
+| [WhatsApp Web](docs/WHATSAPP_INTEGRATION.md) | Production |
+| [WhatsApp Cloud API](docs/WHATSAPP_INTEGRATION.md) | Production |
 | [Slack](docs/channels/slack.md) | Production |
 | [CLI](docs/channels/cli.md) | Production |
 
 </td>
 <td width="50%" valign="top">
 
-**13 Built-in Tools**
+**14 Built-in Tools**
 
-Shell, stealth browser (vision click_at), file read/write/list, web fetch, git, send_message, send_file, memory CRUD, λ-recall, key management, MCP management, self-extend, self-create tool
+Shell, stealth browser (vision click_at), Prowl login (OTK session capture), persistent browser (/browser), file read/write/list, web fetch, git, send_message, send_file, memory CRUD, λ-recall, key management, MCP management, self-extend, self-create tool
 
 **14 MCP Servers** in the registry — discovered and installed at runtime
 
@@ -359,10 +390,10 @@ temm1e (binary)
 ├─ temm1e-providers      Anthropic + Gemini (native) + OpenAI-compatible (6 providers)
 ├─ temm1e-codex-oauth    ChatGPT Plus/Pro via OAuth PKCE
 ├─ temm1e-tui            Interactive terminal UI (ratatui + syntect)
-├─ temm1e-channels       Telegram, Discord, Slack, CLI
+├─ temm1e-channels       Telegram, Discord, WhatsApp (Web + Cloud API), Slack, CLI
 ├─ temm1e-memory         SQLite + Markdown + λ-Memory with automatic failover
 ├─ temm1e-vault          ChaCha20-Poly1305 encrypted secrets
-├─ temm1e-tools          Shell, browser, file ops, web fetch, git, λ-recall
+├─ temm1e-tools          Shell, browser, Prowl (login + observe), file ops, web fetch, git, λ-recall
 ├─ temm1e-mcp            MCP client — stdio + HTTP, 14-server registry
 ├─ temm1e-gateway        HTTP server, health, dashboard, OAuth identity
 ├─ temm1e-skills         Skill registry (TemHub v1)
@@ -396,10 +427,10 @@ temm1e (binary)
 <td align="center"><strong>15 MB</strong><br><sub>Idle RAM</sub></td>
 <td align="center"><strong>31 ms</strong><br><sub>Cold start</sub></td>
 <td align="center"><strong>9.6 MB</strong><br><sub>Binary size</sub></td>
-<td align="center"><strong>1,638</strong><br><sub>Tests</sub></td>
+<td align="center"><strong>1,832</strong><br><sub>Tests</sub></td>
 <td align="center"><strong>8</strong><br><sub>AI Providers</sub></td>
-<td align="center"><strong>14</strong><br><sub>Built-in tools</sub></td>
-<td align="center"><strong>5</strong><br><sub>Channels</sub></td>
+<td align="center"><strong>15</strong><br><sub>Built-in tools</sub></td>
+<td align="center"><strong>7</strong><br><sub>Channels</sub></td>
 </tr>
 </table>
 
@@ -418,17 +449,41 @@ I run on a $5/month 512 MB VPS where Node.js agents can't even start. [Benchmark
 
 ## Setup
 
-Two paths:
+**One-line install** (no Rust needed):
 
-- **[Setup for Beginners](SETUP_FOR_NEWBIE.md)** — step-by-step with screenshots
-- **[Setup for Pros](SETUP_FOR_PROS.md)** — clone, build, configure, deploy
+```bash
+curl -sSfL https://raw.githubusercontent.com/temm1e-labs/temm1e/main/install.sh | sh
+temm1e setup    # Interactive wizard: channel + provider
+temm1e start    # Go live
+```
+
+**From source:**
 
 ```bash
 git clone https://github.com/nagisanzenin/temm1e.git && cd temm1e
 cargo build --release
-export TELEGRAM_BOT_TOKEN="your-token"
-./target/release/temm1e auth login   # ChatGPT OAuth (or skip, paste API key in Telegram)
+./target/release/temm1e setup   # Interactive wizard
 ./target/release/temm1e start
+```
+
+**WhatsApp Web** (scan QR, bot runs as your linked device):
+
+```bash
+cargo build --release --features whatsapp-web
+# Add [channel.whatsapp_web] to config, then start — scan QR code
+```
+
+Detailed guides: **[Beginners](SETUP_FOR_NEWBIE.md)** | **[Pros](SETUP_FOR_PROS.md)**
+
+**Docker:**
+
+```bash
+docker run -d --name temm1e \
+  -p 8080:8080 \
+  -v ~/.temm1e:/data \
+  -e TELEGRAM_BOT_TOKEN="your-token" \
+  -e DISCORD_BOT_TOKEN="your-token" \
+  temm1e:latest
 ```
 
 ---
@@ -436,6 +491,7 @@ export TELEGRAM_BOT_TOKEN="your-token"
 ## CLI Reference
 
 ```
+temm1e setup                 Interactive first-time setup wizard
 temm1e tui                   Interactive TUI (--features tui)
 temm1e start                 Start the gateway (foreground or -d for daemon)
 temm1e start --personality none  No personality, minimal identity prompt
@@ -466,6 +522,9 @@ temm1e reset --confirm       Factory reset with backup
 /mcp                 List connected MCP servers
 /mcp add <name> <cmd>  Connect a new MCP server
 /eigentune           Self-tuning status and control
+/login <service>     OTK browser login (100+ services or custom URL)
+/timelimit           Show current task time limit
+/timelimit <secs>    Set hive task time limit (e.g. /timelimit 3600)
 ```
 
 ---
@@ -474,7 +533,7 @@ temm1e reset --confirm       Factory reset with backup
 
 ```bash
 cargo check --workspace                                              # Quick check
-cargo test --workspace                                               # 1,638 tests
+cargo test --workspace                                               # 1,832 tests
 cargo clippy --workspace --all-targets --all-features -- -D warnings # 0 warnings
 cargo fmt --all                                                      # Format
 cargo build --release                                                # Release binary
@@ -488,6 +547,12 @@ Requires Rust 1.82+ and Chrome/Chromium (for the browser tool).
 <summary><strong>Release Timeline</strong> — every version from first breath to now</summary>
 
 ```
+2026-03-22  v3.3.0  ●━━━ WhatsApp Web + Cloud API channels, one-line installer, setup wizard — wa-rs integration (QR scan pairing, Signal Protocol E2E, SQLite sessions), Cloud API with webhook signature validation, install.sh (curl|sh, multi-platform binaries), `temm1e setup` interactive wizard, multi-platform release CI (x86_64+aarch64, Linux+macOS), fix #21 OpenAI empty name field. 1832 tests
+                    │
+2026-03-22  v3.2.1  ●━━━ Discord integration + channel-agnostic startup — Discord channel wired into message pipeline (was implemented but never connected), per-message channel map routing (Telegram-only/Discord-only/both simultaneously), DISCORD_BOT_TOKEN env auto-inject, wildcard allowlist ("*"), Discord reply threading via MessageReference, /timelimit command for runtime hive task timeout, hive default bumped to 30min, Docker rebuilt with all features (TUI + Discord + health check + tini). 1825 tests
+                    │
+2026-03-21  v3.2.0  ●━━━ Tem Prowl — web-native browsing with OTK authentication. Cloned profile architecture (inherit user's Chrome sessions), /login command (100+ services), /browser lifecycle management, QR auto-detection, layered observation (32% token savings), credential isolation (zeroize + vault), headed/headless fallback. Live validated: Facebook post + Zalo message from Telegram. 1808 tests
+                    │
 2026-03-18  v3.1.0  ●━━━ Eigen-Tune — self-tuning knowledge distillation engine (temm1e-distill), 7-stage pipeline with SPRT/CUSUM/Wilson statistical gates, zero-cost evaluation, proven on M2 with real LoRA fine-tune, 119 new tests, 1638 total. Research: real fine-tuning proof-of-concept on SmolLM2-135M
                     │
 2026-03-18  v3.0.0  ●━━━ Many Tems — stigmergic swarm intelligence runtime (temm1e-hive), Alpha coordinator + worker Tems, task DAG decomposition, scent-field coordination, 4.54x speedup on parallel tasks, zero coordination tokens. Research: quadratic→linear context cost

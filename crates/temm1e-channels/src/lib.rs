@@ -15,6 +15,14 @@ pub mod discord;
 #[cfg(feature = "slack")]
 pub mod slack;
 
+#[cfg(feature = "whatsapp")]
+pub mod whatsapp;
+
+#[cfg(feature = "whatsapp-web")]
+pub mod whatsapp_web;
+
+pub mod whatsapp_common;
+
 // Re-exports for convenience
 pub use cli::CliChannel;
 pub use file_transfer::{read_file_for_sending, save_received_file};
@@ -27,6 +35,12 @@ pub use discord::DiscordChannel;
 
 #[cfg(feature = "slack")]
 pub use slack::SlackChannel;
+
+#[cfg(feature = "whatsapp")]
+pub use whatsapp::WhatsAppChannel;
+
+#[cfg(feature = "whatsapp-web")]
+pub use whatsapp_web::WhatsAppWebChannel;
 
 use std::path::PathBuf;
 use temm1e_core::types::config::ChannelConfig;
@@ -74,6 +88,22 @@ pub fn create_channel(
         #[cfg(not(feature = "slack"))]
         "slack" => Err(Temm1eError::Config(
             "Slack support is not enabled. Compile with --features slack".into(),
+        )),
+
+        #[cfg(feature = "whatsapp")]
+        "whatsapp" => Ok(Box::new(WhatsAppChannel::new(config)?)),
+
+        #[cfg(not(feature = "whatsapp"))]
+        "whatsapp" => Err(Temm1eError::Config(
+            "WhatsApp support is not enabled. Compile with --features whatsapp".into(),
+        )),
+
+        #[cfg(feature = "whatsapp-web")]
+        "whatsapp-web" | "whatsapp_web" => Ok(Box::new(WhatsAppWebChannel::new(config)?)),
+
+        #[cfg(not(feature = "whatsapp-web"))]
+        "whatsapp-web" | "whatsapp_web" => Err(Temm1eError::Config(
+            "WhatsApp Web support is not enabled. Compile with --features whatsapp-web".into(),
         )),
 
         other => Err(Temm1eError::Config(format!("Unknown channel: {other}"))),

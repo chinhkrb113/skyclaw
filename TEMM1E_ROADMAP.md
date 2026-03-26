@@ -585,6 +585,67 @@ The system prompt is currently static. The agent can't modify its own instructio
 
 ---
 
+## Phase 7 — Tem Prowl (Web-Native Browsing) ✓ COMPLETE (2026-03-20)
+
+*Pillar: Autonomy, Elegance. The web is the second home.*
+
+### 7.1 Layered Observation Architecture ✓ DONE (2026-03-20)
+
+Three-tier observation system — accessibility tree, targeted DOM extraction, selective screenshots — with `O(d * log c)` token cost scaling. Deterministic tier selection via tree metadata analysis.
+
+| Metric | Rating |
+|--------|--------|
+| **User Value** | `HIGH` — 3-10x cheaper than screenshot-based browsing. Enables affordable web tasks. |
+| **Innovation** | 8/10 — Formal token complexity bounds for web observation. No other agent runtime has this. |
+| **Risk** | `LOW` — Additive module in temm1e-tools. No existing behavior changes. |
+| **Pillar** | Brutal Efficiency, Autonomy |
+
+### 7.2 Credential Isolation Protocol ✓ DONE (2026-03-20)
+
+Formal separation between LLM reasoning and credential handling. Passwords are `Zeroize`-on-drop, never enter the LLM context. Credential scrubber strips sensitive data from all browser observations.
+
+| Metric | Rating |
+|--------|--------|
+| **User Value** | `CRITICAL` — Users can log into websites via Tem without their passwords being exposed to the LLM. |
+| **Innovation** | 9/10 — Provable credential non-transit is novel. No web agent has formal isolation guarantees. |
+| **Risk** | `LOW` — Credential scrubber is a filter layer. Cannot break existing flows. |
+| **Pillar** | Robustness, Elegance |
+
+### 7.3 OTK Session Capture ✓ DONE (2026-03-20)
+
+`/login <service>` command with 100+ pre-registered services. Users log in via annotated screenshot flow — numbered interactive elements, click-by-number, type-to-fill. Sessions encrypted and stored in vault.
+
+| Metric | Rating |
+|--------|--------|
+| **User Value** | `HIGH` — `/login facebook` is all it takes. Works for 100+ services or any custom URL. |
+| **Innovation** | 9/10 — One-time key authentication delegation via messaging is genuinely novel. |
+| **Risk** | `MEDIUM` — Session capture depends on site-specific login flows. Edge cases on complex auth (MFA, CAPTCHA). |
+| **Pillar** | Autonomy, Elegance |
+
+### 7.4 Web Blueprints ✓ DONE (2026-03-20)
+
+Four web-specific blueprints: `web_login`, `web_search`, `web_extract`, `web_compare`. Login registry with 111 entries including aliases.
+
+| Metric | Rating |
+|--------|--------|
+| **User Value** | `HIGH` — Procedural memory for common web tasks. The 10th login is instant, not re-derived. |
+| **Innovation** | 7/10 — Blueprint system applied to web tasks with per-service customization. |
+| **Risk** | `LOW` — Additive blueprints. Cannot break existing behavior. |
+| **Pillar** | Tem's Mind, Brutal Efficiency |
+
+### 7.5 Swarm Browsing ✓ DONE (2026-03-20)
+
+Extends Many Tems (temm1e-hive) to parallel browser operation. Browser pool with lock-free atomic CAS slot allocation. Four browse-specific pheromone signal types. N browsers, zero coordination tokens.
+
+| Metric | Rating |
+|--------|--------|
+| **User Value** | `HIGH` — Multi-site tasks (compare prices, check availability across stores) run in parallel. |
+| **Innovation** | 10/10 — First integration of swarm intelligence with web browser automation. No existing agent does this. |
+| **Risk** | `MEDIUM` — Chrome memory budget scales with pool size. Needs careful configuration. |
+| **Pillar** | Brutal Efficiency, Autonomy |
+
+---
+
 ## Dependency Graph
 
 ```
@@ -697,6 +758,11 @@ Independent tracks that can proceed in parallel:
 | 6.2 | Agent Delegation | HIGH | 9 | HIGH | Tem's Mind |
 | 6.3 | Proactive Initiation | HIGH | 8 | HIGH | Tem's Mind |
 | 6.4 | Self-Tuning Prompt | MEDIUM | 9 | CRITICAL | Tem's Mind |
+| 7.1 | Layered Observation | HIGH | 8 | LOW | Brutal Efficiency | ✓ DONE |
+| 7.2 | Credential Isolation | CRITICAL | 9 | LOW | Robustness | ✓ DONE |
+| 7.3 | OTK Session Capture | HIGH | 9 | MEDIUM | Autonomy | ✓ DONE |
+| 7.4 | Web Blueprints | HIGH | 7 | LOW | Tem's Mind | ✓ DONE |
+| 7.5 | Swarm Browsing | HIGH | 10 | MEDIUM | Brutal Efficiency | ✓ DONE |
 
 ---
 

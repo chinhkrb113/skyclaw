@@ -59,3 +59,9 @@ enabled = true
 token = "${TELEGRAM_BOT_TOKEN}"
 allowlist = []
 file_transfer = true
+
+[channel.whatsapp_web]
+enabled = true
+token = "allowlist:ignore"
+allowlist = []
+file_transfer = true

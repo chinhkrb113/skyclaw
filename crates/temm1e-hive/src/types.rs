@@ -180,6 +180,15 @@ pub enum SignalType {
     Progress,
     /// Worker requesting specialist assistance.
     HelpWanted,
+    // -- Browse-specific signals (Prowl Phase 5) --
+    /// Browser detected as automated (HTTP 403, CAPTCHA, etc.).
+    BotDetected,
+    /// Authenticated session expired — login page encountered unexpectedly.
+    SessionExpired,
+    /// Browse worker successfully extracted data from a page.
+    DataFound,
+    /// Target domain returned HTTP 429 — back off.
+    RateLimit,
 }
 
 impl SignalType {
@@ -191,6 +200,10 @@ impl SignalType {
             Self::Urgency => "urgency",
             Self::Progress => "progress",
             Self::HelpWanted => "help_wanted",
+            Self::BotDetected => "bot_detected",
+            Self::SessionExpired => "session_expired",
+            Self::DataFound => "data_found",
+            Self::RateLimit => "rate_limit",
         }
     }
 
@@ -202,6 +215,10 @@ impl SignalType {
             "urgency" => Some(Self::Urgency),
             "progress" => Some(Self::Progress),
             "help_wanted" => Some(Self::HelpWanted),
+            "bot_detected" => Some(Self::BotDetected),
+            "session_expired" => Some(Self::SessionExpired),
+            "data_found" => Some(Self::DataFound),
+            "rate_limit" => Some(Self::RateLimit),
             _ => None,
         }
     }
@@ -215,6 +232,10 @@ impl SignalType {
             Self::Urgency => -0.001, // grows over time
             Self::Progress => 0.035,
             Self::HelpWanted => 0.006,
+            Self::BotDetected => 0.004,    // ~3 min half-life
+            Self::SessionExpired => 0.012, // ~1 min half-life
+            Self::DataFound => 0.001,      // ~10 min half-life
+            Self::RateLimit => 0.002,      // ~5 min half-life
         }
     }
 
@@ -227,6 +248,10 @@ impl SignalType {
             Self::Urgency => 0.1,
             Self::Progress => 0.5,
             Self::HelpWanted => 1.0,
+            Self::BotDetected => 1.0,
+            Self::SessionExpired => 1.0,
+            Self::DataFound => 0.8,
+            Self::RateLimit => 1.0,
         }
     }
 }
@@ -421,10 +446,34 @@ mod tests {
             SignalType::Urgency,
             SignalType::Progress,
             SignalType::HelpWanted,
+            SignalType::BotDetected,
+            SignalType::SessionExpired,
+            SignalType::DataFound,
+            SignalType::RateLimit,
         ] {
             let s = st.as_str();
             assert_eq!(SignalType::parse_str(s), Some(st));
         }
+    }
+
+    #[test]
+    fn browse_signal_decay_rates() {
+        // BotDetected: ~3 min half-life → ρ = 0.004
+        assert!((SignalType::BotDetected.default_decay_rate() - 0.004).abs() < 1e-9);
+        // SessionExpired: ~1 min half-life → ρ = 0.012
+        assert!((SignalType::SessionExpired.default_decay_rate() - 0.012).abs() < 1e-9);
+        // DataFound: ~10 min half-life → ρ = 0.001
+        assert!((SignalType::DataFound.default_decay_rate() - 0.001).abs() < 1e-9);
+        // RateLimit: ~5 min half-life → ρ = 0.002
+        assert!((SignalType::RateLimit.default_decay_rate() - 0.002).abs() < 1e-9);
+    }
+
+    #[test]
+    fn browse_signal_default_intensities() {
+        assert!((SignalType::BotDetected.default_intensity() - 1.0).abs() < 1e-9);
+        assert!((SignalType::SessionExpired.default_intensity() - 1.0).abs() < 1e-9);
+        assert!((SignalType::DataFound.default_intensity() - 0.8).abs() < 1e-9);
+        assert!((SignalType::RateLimit.default_intensity() - 1.0).abs() < 1e-9);
     }
 
     #[test]

@@ -30,33 +30,97 @@ jobs:
         run: cargo fmt --check
 
   release:
-    name: Release
-    runs-on: ubuntu-latest
+    name: Release — ${{ matrix.target }}
     needs: check
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            artifact: temm1e-x86_64-linux
+          # aarch64-linux-musl disabled: cross-compiling vendored OpenSSL
+          # for musl+aarch64 has unresolved glibc symbol issues. Use Docker
+          # multi-arch builds or `cross` tool for this target in the future.
+          # - target: aarch64-unknown-linux-musl
+          #   os: ubuntu-latest
+          #   artifact: temm1e-aarch64-linux
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact: temm1e-x86_64-macos
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact: temm1e-aarch64-macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl-tools (Linux x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools perl make
+          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
+
+      - name: Install cross-compilation tools (aarch64-linux)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu perl make
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
+
+      - name: Build release binary
+        run: |
+          if [[ "${{ matrix.target }}" == *"linux"* ]]; then
+            cargo build --release --target ${{ matrix.target }} --features openssl-vendored
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/temm1e dist/${{ matrix.artifact }}
+          chmod +x dist/${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+
+  publish:
+    name: Publish GitHub Release
+    needs: release
+    runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          targets: x86_64-unknown-linux-musl
+          path: dist
+          merge-multiple: true
 
-      - name: Install musl-tools
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-
-      - name: Build release binary
-        run: cargo build --release --target x86_64-unknown-linux-musl
-
-      - name: Prepare artifact
+      - name: Generate checksums
         run: |
-          mkdir -p dist
-          cp target/x86_64-unknown-linux-musl/release/temm1e dist/temm1e-x86_64-linux-musl
-          chmod +x dist/temm1e-x86_64-linux-musl
+          cd dist
+          sha256sum temm1e-* > checksums-sha256.txt
+          cat checksums-sha256.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/temm1e-x86_64-linux-musl
+          files: |
+            dist/temm1e-*
+            dist/checksums-sha256.txt
           generate_release_notes: true

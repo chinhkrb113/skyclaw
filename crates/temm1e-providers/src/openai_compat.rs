@@ -430,6 +430,11 @@ fn convert_message_to_openai(
                         ContentPart::ToolUse {
                             id, name, input, ..
                         } => {
+                            // Skip tool calls with empty name — OpenAI rejects
+                            // empty strings with `invalid_request_error` (GH-21).
+                            if name.is_empty() {
+                                continue;
+                            }
                             tool_calls.push(serde_json::json!({
                                 "id": id,
                                 "type": "function",
@@ -478,8 +483,11 @@ fn convert_message_to_openai(
                             "content": content,
                         });
                         // Include `name` field — required by Gemini, accepted by OpenAI.
+                        // Skip if empty — OpenAI rejects empty strings (GH-21).
                         if let Some(name) = tool_name_map.get(tool_use_id) {
-                            msg_obj["name"] = serde_json::json!(name);
+                            if !name.is_empty() {
+                                msg_obj["name"] = serde_json::json!(name);
+                            }
                         }
                         tool_messages.push(msg_obj);
                     }
@@ -1080,6 +1088,51 @@ mod tests {
         name_map.insert("call_1".to_string(), "shell".to_string());
         let json = convert_message_to_openai(&msg, &name_map).unwrap();
         assert_eq!(json["name"], "shell");
+    }
+
+    #[test]
+    fn empty_tool_name_skipped_in_tool_calls_gh21() {
+        // GH-21: empty `name` causes OpenAI 400 Bad Request
+        let msg = ChatMessage {
+            role: Role::Assistant,
+            content: MessageContent::Parts(vec![
+                ContentPart::ToolUse {
+                    id: "call_good".to_string(),
+                    name: "shell".to_string(),
+                    input: serde_json::json!({"command": "ls"}),
+                    thought_signature: None,
+                },
+                ContentPart::ToolUse {
+                    id: "call_bad".to_string(),
+                    name: "".to_string(),
+                    input: serde_json::json!({}),
+                    thought_signature: None,
+                },
+            ]),
+        };
+        let json = convert_message_to_openai(&msg, &HashMap::new()).unwrap();
+        let tool_calls = json["tool_calls"].as_array().unwrap();
+        // Only the non-empty name tool call should be included
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0]["function"]["name"], "shell");
+    }
+
+    #[test]
+    fn empty_tool_name_omitted_from_tool_result_gh21() {
+        // GH-21: empty `name` on tool result messages causes OpenAI 400
+        let msg = ChatMessage {
+            role: Role::Tool,
+            content: MessageContent::Parts(vec![ContentPart::ToolResult {
+                tool_use_id: "call_1".to_string(),
+                content: "output".to_string(),
+                is_error: false,
+            }]),
+        };
+        let mut name_map = HashMap::new();
+        name_map.insert("call_1".to_string(), "".to_string());
+        let json = convert_message_to_openai(&msg, &name_map).unwrap();
+        // Empty name should NOT be included
+        assert!(json.get("name").is_none());
     }
 
     #[test]

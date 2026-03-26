@@ -13,6 +13,28 @@ use crate::dag;
 use crate::types::DecompositionResult;
 
 // ---------------------------------------------------------------------------
+// Web Decomposition Guide
+// ---------------------------------------------------------------------------
+
+/// Additional decomposition guidance injected into the Queen's prompt when
+/// browser tools are available. Teaches the Queen to create proper DAGs for
+/// multi-site browsing tasks — each domain as an independent subtask tagged
+/// with "browse", plus a final aggregation task.
+const WEB_DECOMPOSITION_GUIDE: &str = r#"
+ADDITIONAL RULES FOR WEB BROWSING TASKS:
+- Each different website/domain is an INDEPENDENT subtask (no dependencies between sites)
+- Tag browse subtasks with "browse" in context_tags so workers claim browser contexts
+- Always add a final "aggregate" or "compare" task that depends on all browse subtasks
+- Include the full target URL in each subtask's description
+- If a subtask requires authentication, include "auth:{service_name}" in context_tags
+- Example decomposition for "compare prices on Amazon, eBay, Walmart":
+  t1: "Search Amazon for {item}" [tags: browse] [deps: none]
+  t2: "Search eBay for {item}" [tags: browse] [deps: none]
+  t3: "Search Walmart for {item}" [tags: browse] [deps: none]
+  t4: "Compare results and rank by price" [deps: t1, t2, t3]
+"#;
+
+// ---------------------------------------------------------------------------
 // Queen
 // ---------------------------------------------------------------------------
 
@@ -93,6 +115,24 @@ USER REQUEST:
 Respond with ONLY valid JSON (no markdown, no explanation):
 {{"tasks": [{{"id": "t1", "description": "...", "dependencies": [], "context_tags": ["..."], "estimated_tokens": 3000}}], "single_agent_recommended": false, "reasoning": "Brief explanation"}}"#
         )
+    }
+
+    /// Build the decomposition prompt with tool-aware guidance.
+    ///
+    /// When `tools_available` includes `"browser"`, the web decomposition
+    /// guide is appended to teach the Queen how to create proper DAGs for
+    /// multi-site browsing tasks.
+    pub fn build_decomposition_prompt_with_tools(
+        message: &str,
+        tools_available: &[&str],
+    ) -> String {
+        let mut prompt = Self::build_decomposition_prompt(message);
+
+        if tools_available.contains(&"browser") {
+            prompt.push_str(WEB_DECOMPOSITION_GUIDE);
+        }
+
+        prompt
     }
 
     /// Parse the LLM's JSON response into a DecompositionResult.
@@ -283,6 +323,32 @@ mod tests {
         ], "single_agent_recommended": false, "reasoning": "cycle"}"#;
 
         assert!(Queen::parse_decomposition(json).is_err());
+    }
+
+    #[test]
+    fn web_decomposition_guide_included_when_browser_available() {
+        let prompt = Queen::build_decomposition_prompt_with_tools(
+            "Compare prices on Amazon and eBay",
+            &["shell", "browser", "file"],
+        );
+        assert!(prompt.contains("Tag browse subtasks"));
+        assert!(prompt.contains("context_tags"));
+        assert!(prompt.contains("auth:{service_name}"));
+    }
+
+    #[test]
+    fn web_decomposition_guide_excluded_without_browser() {
+        let prompt = Queen::build_decomposition_prompt_with_tools(
+            "Compare prices on Amazon and eBay",
+            &["shell", "file"],
+        );
+        assert!(!prompt.contains("Tag browse subtasks"));
+    }
+
+    #[test]
+    fn web_decomposition_guide_with_empty_tools() {
+        let prompt = Queen::build_decomposition_prompt_with_tools("test", &[]);
+        assert!(!prompt.contains("Tag browse subtasks"));
     }
 
     #[test]

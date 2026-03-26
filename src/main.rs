@@ -125,6 +125,8 @@ enum Commands {
     /// Interactive TUI with rich rendering, observability, and slash commands
     #[cfg(feature = "tui")]
     Tui,
+    /// Interactive setup wizard — guides you through first-time configuration
+    Setup,
 }
 
 #[cfg(feature = "codex-oauth")]
@@ -223,6 +225,30 @@ async fn validate_provider_key(
 // Placeholder to satisfy the compiler for the deleted block below.
 // The actual functions are now imported at the top of this file.
 /// Check if a user is the admin by reading `~/.temm1e/allowlist.toml`.
+/// Format a capture timestamp into a human-readable age string.
+///
+/// Takes an ISO 8601 timestamp and returns e.g. "2h ago", "5m ago", "1d ago".
+#[cfg(feature = "browser")]
+fn format_capture_age(captured_at: &str) -> String {
+    let captured = match chrono::DateTime::parse_from_rfc3339(captured_at) {
+        Ok(dt) => dt.with_timezone(&chrono::Utc),
+        Err(_) => return "unknown".to_string(),
+    };
+    let elapsed = chrono::Utc::now().signed_duration_since(captured);
+    let secs = elapsed.num_seconds();
+    if secs < 0 {
+        "just now".to_string()
+    } else if secs < 60 {
+        format!("{}s ago", secs)
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86400)
+    }
+}
+
 fn is_admin_user(user_id: &str) -> bool {
     let path = dirs::home_dir().map(|h| h.join(".temm1e").join("allowlist.toml"));
     let path = match path {
@@ -347,8 +373,25 @@ KEY RULES:\n\
 - For timed/periodic tasks (e.g. send something every N seconds), use \
   shell(\"sleep N\") then send_message in a loop across tool rounds.\n\
 - When asked to visit a website, open a page, or interact with a web app, \
-  USE THE BROWSER TOOL with proper action parameter. Example: browser(action=\"navigate\", url=\"https://youtube.com\")\n\
-- After finishing browser work, call browser(action=\"close\") to shut it down.\n\
+  USE THE BROWSER TOOL. Do not refuse or explain why you can't — just do it.\n\
+- Do NOT close the browser after finishing a task. The browser stays open so \
+  sessions persist (logged-in sites stay logged in). The user controls the \
+  browser lifecycle with /browser close.\n\
+- When using browser observe/accessibility_tree, share key findings with the user. \
+Show them what elements you found (e.g., 'I can see a search box, login button, \
+and 3 article links'). Don't just silently process the tree — the user wants to \
+know what you see.\n\
+- SECURITY: NEVER ask users to send passwords or credentials in chat.\n\
+- LOGIN FLOW (follow this order):\n\
+  1. First try browser action 'restore_web_session' with the service name — the user \
+     may already have a saved session.\n\
+  2. If restore fails, navigate to the login page and take a screenshot.\n\
+  3. If you see a QR code on the page — send the screenshot to the user and say \
+     'Scan this QR code to log in. Tell me when done.' Then wait for the user. \
+     After they confirm, observe the page to verify login succeeded.\n\
+  4. If you see a password form (no QR) — tell the user to use /login <service> \
+     to enter credentials securely. NEVER type passwords yourself.\n\
+  5. Once logged in, the session auto-saves. Future tasks restore automatically.\n\
 - Reply in the same language the user writes in.\n\
 - Be concise. No emoji unless the user uses them.\n\
 - NEVER give up on a task by explaining limitations. You have a multi-round \
@@ -918,6 +961,228 @@ async fn send_with_retry(
     }
 }
 
+/// Interactive setup wizard — guides first-time users through configuration.
+///
+/// Steps:
+/// 1. Channel selection (Telegram, Discord, or skip)
+/// 2. AI provider authentication
+/// 3. Writes a minimal config and prints next steps
+async fn run_setup_wizard() -> Result<()> {
+    use std::io::{self, BufRead, Write};
+
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?;
+    let temm1e_dir = home.join(".temm1e");
+    std::fs::create_dir_all(&temm1e_dir)?;
+
+    println!();
+    println!("  ╭──────────────────────────────────────╮");
+    println!("  │       TEMM1E — Setup Wizard          │");
+    println!("  ╰──────────────────────────────────────╯");
+    println!();
+
+    let stdin = io::stdin();
+    let mut input = String::new();
+
+    // ── Step 1: Channel ─────────────────────────────────────────────
+    println!("  How do you want to talk to me?");
+    println!();
+    println!("    1) Telegram bot  (most popular)");
+    println!("    2) Discord bot");
+    println!("    3) CLI only      (no messaging app needed)");
+    println!();
+    print!("  Choose [1/2/3]: ");
+    io::stdout().flush()?;
+    input.clear();
+    stdin.lock().read_line(&mut input)?;
+    let channel_choice = input.trim();
+
+    let mut config_lines: Vec<String> = Vec::new();
+    let mut env_hint = String::new();
+
+    match channel_choice {
+        "1" | "telegram" | "" => {
+            println!();
+            println!("  Telegram! Great choice.");
+            println!();
+            println!("  If you don't have a bot yet:");
+            println!("    1. Open Telegram, search @BotFather");
+            println!("    2. Send /newbot, follow the prompts");
+            println!("    3. Copy the bot token");
+            println!();
+            print!("  Paste your Telegram bot token (or press Enter to skip): ");
+            io::stdout().flush()?;
+            input.clear();
+            stdin.lock().read_line(&mut input)?;
+            let token = input.trim();
+            if token.is_empty() {
+                println!(
+                    "  Skipped — set TELEGRAM_BOT_TOKEN env var before running `temm1e start`."
+                );
+                env_hint = "export TELEGRAM_BOT_TOKEN=\"your-token-here\"".to_string();
+            } else {
+                config_lines.push("[channel.telegram]".to_string());
+                config_lines.push("enabled = true".to_string());
+                config_lines.push(format!("token = \"{}\"", token));
+                config_lines.push("allowlist = []".to_string());
+                config_lines.push("file_transfer = true".to_string());
+            }
+        }
+        "2" | "discord" => {
+            println!();
+            println!("  Discord! Nice.");
+            println!();
+            print!("  Paste your Discord bot token (or press Enter to skip): ");
+            io::stdout().flush()?;
+            input.clear();
+            stdin.lock().read_line(&mut input)?;
+            let token = input.trim();
+            if token.is_empty() {
+                println!(
+                    "  Skipped — set DISCORD_BOT_TOKEN env var before running `temm1e start`."
+                );
+                env_hint = "export DISCORD_BOT_TOKEN=\"your-token-here\"".to_string();
+            } else {
+                config_lines.push("[channel.discord]".to_string());
+                config_lines.push("enabled = true".to_string());
+                config_lines.push(format!("token = \"{}\"", token));
+                config_lines.push("allowlist = []".to_string());
+            }
+        }
+        "3" | "cli" => {
+            println!();
+            println!("  CLI mode — run `temm1e chat` to talk to me directly.");
+        }
+        _ => {
+            println!("  Defaulting to CLI mode.");
+        }
+    }
+
+    // ── Step 2: AI Provider ─────────────────────────────────────────
+    println!();
+    println!("  How do you want to power my brain?");
+    println!();
+    println!("    1) Paste an API key (Anthropic, OpenAI, Gemini, Grok, etc.)");
+    println!("    2) Use ChatGPT Plus/Pro (OAuth login)");
+    println!("    3) Skip for now (set up in chat later)");
+    println!();
+    print!("  Choose [1/2/3]: ");
+    io::stdout().flush()?;
+    input.clear();
+    stdin.lock().read_line(&mut input)?;
+    let provider_choice = input.trim();
+
+    // Detect if user pasted an API key directly instead of choosing 1/2/3
+    let key_at_choice = if provider_choice.starts_with("sk-")
+        || provider_choice.starts_with("AIzaSy")
+        || provider_choice.starts_with("xai-")
+    {
+        Some(provider_choice.to_string())
+    } else {
+        None
+    };
+
+    match provider_choice {
+        _ if key_at_choice.is_some() => {
+            // User pasted API key directly at the choice prompt
+            let key = key_at_choice.unwrap();
+            if !key.is_empty() {
+                // Auto-detect provider
+                let provider = if key.starts_with("sk-ant-") {
+                    "anthropic"
+                } else if key.starts_with("AIzaSy") {
+                    "gemini"
+                } else if key.starts_with("xai-") {
+                    "grok"
+                } else if key.starts_with("sk-or-") {
+                    "openrouter"
+                } else {
+                    // Default: OpenAI-compatible (sk- prefix or unknown)
+                    "openai"
+                };
+                println!("  Detected provider: {provider}");
+
+                // Save to credentials file (encrypted later by the agent)
+                let creds_path = temm1e_dir.join("credentials.toml");
+                let creds_content = format!("[providers.{}]\napi_key = \"{}\"\n", provider, key);
+                std::fs::write(&creds_path, creds_content)?;
+                println!("  Saved to ~/.temm1e/credentials.toml");
+            } else {
+                println!("  Skipped — you can paste your API key in chat later.");
+            }
+        }
+        "1" | "api" | "" => {
+            println!();
+            print!("  Paste your API key: ");
+            io::stdout().flush()?;
+            input.clear();
+            stdin.lock().read_line(&mut input)?;
+            let key = input.trim().to_string();
+            if !key.is_empty() {
+                let provider = if key.starts_with("sk-ant-") {
+                    "anthropic"
+                } else if key.starts_with("AIzaSy") {
+                    "gemini"
+                } else if key.starts_with("xai-") {
+                    "grok"
+                } else if key.starts_with("sk-or-") {
+                    "openrouter"
+                } else {
+                    "openai"
+                };
+                println!("  Detected provider: {provider}");
+                let creds_path = temm1e_dir.join("credentials.toml");
+                let creds_content = format!("[providers.{}]\napi_key = \"{}\"\n", provider, key);
+                std::fs::write(&creds_path, creds_content)?;
+                println!("  Saved to ~/.temm1e/credentials.toml");
+            } else {
+                println!("  Skipped — you can paste your API key in chat later.");
+            }
+        }
+        "2" | "oauth" | "chatgpt" => {
+            println!();
+            println!("  Run `temm1e auth login` to authenticate with ChatGPT.");
+        }
+        _ => {
+            println!("  Skipped — you can set up a provider in chat later.");
+        }
+    }
+
+    // ── Step 3: Write config ────────────────────────────────────────
+    // Must match the config loader's search path: ~/.temm1e/config.toml
+    let config_path = temm1e_dir.join("config.toml");
+    if !config_lines.is_empty() {
+        // Build minimal config
+        let mut full_config = String::new();
+        full_config.push_str("# TEMM1E configuration — generated by `temm1e setup`\n\n");
+        full_config.push_str("[memory]\nbackend = \"sqlite\"\n\n");
+        full_config.push_str(&config_lines.join("\n"));
+        full_config.push('\n');
+
+        std::fs::write(&config_path, &full_config)?;
+        println!();
+        println!("  Config written to ~/.temm1e/config.toml");
+    }
+
+    // ── Done ────────────────────────────────────────────────────────
+    println!();
+    println!("  ╭──────────────────────────────────────╮");
+    println!("  │         Setup complete!               │");
+    println!("  ╰──────────────────────────────────────╯");
+    println!();
+    if !env_hint.is_empty() {
+        println!("  Before starting, set your token:");
+        println!("    {}", env_hint);
+        println!();
+    }
+    println!("  Next steps:");
+    println!("    temm1e start       Start the bot");
+    println!("    temm1e chat        Chat in CLI mode");
+    println!("    temm1e status      Check health");
+    println!();
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -1312,8 +1577,9 @@ async fn main() -> Result<()> {
             );
             tracing::info!(backend = %config.memory.backend, "Memory initialized");
 
-            // ── Telegram channel ───────────────────────────────
+            // ── Messaging channels ────────────────────────────────
             let mut channels: Vec<Arc<dyn temm1e_core::Channel>> = Vec::new();
+            let mut channel_map: HashMap<String, Arc<dyn temm1e_core::Channel>> = HashMap::new();
             let mut primary_channel: Option<Arc<dyn temm1e_core::Channel>> = None;
             let mut tg_rx: Option<
                 tokio::sync::mpsc::Receiver<temm1e_core::types::message::InboundMessage>,
@@ -1346,10 +1612,95 @@ async fn main() -> Result<()> {
                     tg_rx = tg.take_receiver();
                     let tg_arc: Arc<dyn temm1e_core::Channel> = Arc::new(tg);
                     channels.push(tg_arc.clone());
+                    channel_map.insert("telegram".to_string(), tg_arc.clone());
                     primary_channel = Some(tg_arc.clone());
                     tracing::info!("Telegram channel started");
                 }
             }
+
+            // ── Discord channel ───────────────────────────────
+            #[cfg(feature = "discord")]
+            let mut discord_rx: Option<
+                tokio::sync::mpsc::Receiver<temm1e_core::types::message::InboundMessage>,
+            > = None;
+
+            #[cfg(feature = "discord")]
+            {
+                // Auto-inject Discord config from env var when no config entry exists.
+                // Mirrors the Telegram zero-config pattern.
+                if !config.channel.contains_key("discord") {
+                    if let Ok(token) = std::env::var("DISCORD_BOT_TOKEN") {
+                        if !token.is_empty() {
+                            config.channel.insert(
+                                "discord".to_string(),
+                                temm1e_core::types::config::ChannelConfig {
+                                    enabled: true,
+                                    token: Some(token),
+                                    allowlist: vec![],
+                                    file_transfer: true,
+                                    max_file_size: None,
+                                },
+                            );
+                            tracing::info!(
+                                "Auto-configured Discord from DISCORD_BOT_TOKEN env var"
+                            );
+                        }
+                    }
+                }
+
+                if let Some(discord_config) = config.channel.get("discord") {
+                    if discord_config.enabled {
+                        let mut discord = temm1e_channels::DiscordChannel::new(discord_config)?;
+                        discord.start().await?;
+                        discord_rx = discord.take_receiver();
+                        let discord_arc: Arc<dyn temm1e_core::Channel> = Arc::new(discord);
+                        channels.push(discord_arc.clone());
+                        channel_map.insert("discord".to_string(), discord_arc.clone());
+                        if primary_channel.is_none() {
+                            primary_channel = Some(discord_arc.clone());
+                        }
+                        tracing::info!("Discord channel started");
+                    }
+                }
+            }
+
+            // ── WhatsApp Web channel ─────────────────────────
+            #[cfg(feature = "whatsapp-web")]
+            let mut whatsapp_web_rx: Option<
+                tokio::sync::mpsc::Receiver<temm1e_core::types::message::InboundMessage>,
+            > = None;
+
+            #[cfg(feature = "whatsapp-web")]
+            {
+                if let Some(wa_config) = config
+                    .channel
+                    .get("whatsapp_web")
+                    .or_else(|| config.channel.get("whatsapp-web"))
+                {
+                    if wa_config.enabled {
+                        let mut wa = temm1e_channels::WhatsAppWebChannel::new(wa_config)?;
+                        wa.start().await?;
+                        whatsapp_web_rx = wa.take_receiver();
+                        let wa_arc: Arc<dyn temm1e_core::Channel> = Arc::new(wa);
+                        channels.push(wa_arc.clone());
+                        channel_map.insert("whatsapp-web".to_string(), wa_arc.clone());
+                        if primary_channel.is_none() {
+                            primary_channel = Some(wa_arc.clone());
+                        }
+                        tracing::info!("WhatsApp Web channel started");
+                    }
+                }
+            }
+
+            // ── Channel map zero-channels guard ──────────────────
+            if channel_map.is_empty() {
+                tracing::warn!(
+                    "No messaging channels configured. Set TELEGRAM_BOT_TOKEN or DISCORD_BOT_TOKEN, \
+                     or add [channel.telegram] / [channel.discord] to config."
+                );
+            }
+            let channel_map: Arc<HashMap<String, Arc<dyn temm1e_core::Channel>>> =
+                Arc::new(channel_map);
 
             // ── Pending messages ───────────────────────────────
             let pending_messages: temm1e_tools::PendingMessages =
@@ -1362,10 +1713,30 @@ async fn main() -> Result<()> {
             let pending_raw_keys: Arc<Mutex<HashSet<String>>> =
                 Arc::new(Mutex::new(HashSet::new()));
 
+            // ── Active login sessions (OTK Prowl — per-chat interactive browser sessions) ────
+            #[cfg(feature = "browser")]
+            let login_sessions: Arc<
+                Mutex<HashMap<String, temm1e_tools::browser_session::InteractiveBrowseSession>>,
+            > = Arc::new(Mutex::new(HashMap::new()));
+
             // ── Usage store (shares same SQLite DB as memory) ────
             let usage_store: Arc<dyn temm1e_core::UsageStore> =
                 Arc::new(temm1e_memory::SqliteUsageStore::new(&memory_url).await?);
             tracing::info!("Usage store initialized");
+
+            // ── Vault (encrypted credential store) ───────────────
+            let vault: Option<Arc<dyn temm1e_core::Vault>> = match temm1e_vault::LocalVault::new()
+                .await
+            {
+                Ok(v) => {
+                    tracing::info!("Vault initialized");
+                    Some(Arc::new(v) as Arc<dyn temm1e_core::Vault>)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Vault initialization failed — browser authenticate disabled");
+                    None
+                }
+            };
 
             // ── Tools (with secret-censoring channel wrapper) ───
             let censored_channel: Option<Arc<dyn Channel>> = primary_channel
@@ -1378,6 +1749,24 @@ async fn main() -> Result<()> {
             > = Arc::new(tokio::sync::RwLock::new(
                 temm1e_core::types::config::MemoryStrategy::Lambda,
             ));
+            // Use create_tools_with_browser to get a separate BrowserTool reference
+            // for /browser command handling.
+            #[cfg(feature = "browser")]
+            let (mut tools, browser_tool_ref) = temm1e_tools::create_tools_with_browser(
+                &config.tools,
+                censored_channel.clone(),
+                Some(pending_messages.clone()),
+                Some(memory.clone()),
+                Some(Arc::new(setup_tokens.clone()) as Arc<dyn temm1e_core::SetupLinkGenerator>),
+                Some(usage_store.clone()),
+                if personality_locked {
+                    None
+                } else {
+                    Some(shared_mode.clone())
+                },
+                vault.clone(),
+            );
+            #[cfg(not(feature = "browser"))]
             let mut tools = temm1e_tools::create_tools(
                 &config.tools,
                 censored_channel,
@@ -1385,12 +1774,12 @@ async fn main() -> Result<()> {
                 Some(memory.clone()),
                 Some(Arc::new(setup_tokens.clone()) as Arc<dyn temm1e_core::SetupLinkGenerator>),
                 Some(usage_store.clone()),
-                // Don't register mode_switch tool when personality is locked (work/pro)
                 if personality_locked {
                     None
                 } else {
                     Some(shared_mode.clone())
                 },
+                vault.clone(),
             );
             tracing::info!(count = tools.len(), "Tools initialized");
 
@@ -1598,6 +1987,32 @@ async fn main() -> Result<()> {
                 }));
             }
 
+            // Wire Discord messages into the unified channel
+            #[cfg(feature = "discord")]
+            if let Some(mut discord_rx) = discord_rx {
+                let tx = msg_tx.clone();
+                task_handles.push(tokio::spawn(async move {
+                    while let Some(msg) = discord_rx.recv().await {
+                        if tx.send(msg).await.is_err() {
+                            break;
+                        }
+                    }
+                }));
+            }
+
+            // Wire WhatsApp Web messages into the unified channel
+            #[cfg(feature = "whatsapp-web")]
+            if let Some(mut wa_rx) = whatsapp_web_rx {
+                let tx = msg_tx.clone();
+                task_handles.push(tokio::spawn(async move {
+                    while let Some(msg) = wa_rx.recv().await {
+                        if tx.send(msg).await.is_err() {
+                            break;
+                        }
+                    }
+                }));
+            }
+
             // ── Workspace ──────────────────────────────────────
             let workspace_path = dirs::home_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
@@ -1692,7 +2107,9 @@ async fn main() -> Result<()> {
                 cancel_token: tokio_util::sync::CancellationToken,
             }
 
-            if let Some(sender) = primary_channel.clone() {
+            if !channel_map.is_empty() {
+                let channel_map_arc = channel_map.clone();
+                let primary_fallback = primary_channel.clone();
                 let agent_state_clone = agent_state.clone();
                 let memory_clone = memory.clone();
                 let tools_clone = tools.clone();
@@ -1711,6 +2128,8 @@ async fn main() -> Result<()> {
                 let pending_clone = pending_messages.clone();
                 let setup_tokens_clone = setup_tokens.clone();
                 let pending_raw_keys_clone = pending_raw_keys.clone();
+                #[cfg(feature = "browser")]
+                let login_sessions_clone = login_sessions.clone();
                 let usage_store_clone = usage_store.clone();
                 let hive_clone = hive_instance.clone();
 
@@ -1771,7 +2190,11 @@ async fn main() -> Result<()> {
                                     }
                                     // LLM interceptor — runs on a separate task.
                                     // Can chat, give status, or cancel the active task.
-                                    let icpt_sender = sender.clone();
+                                    let icpt_sender = channel_map_arc
+                                        .get(&inbound.channel)
+                                        .cloned()
+                                        .or_else(|| primary_fallback.clone())
+                                        .expect("channel_map is non-empty, checked at gate");
                                     let icpt_chat_id = chat_id.clone();
                                     let icpt_msg_id = inbound.id.clone();
                                     let icpt_msg_text = inbound.text.clone().unwrap_or_default();
@@ -1909,7 +2332,8 @@ async fn main() -> Result<()> {
                             let pp_opt = agent_parallel_phases;
                             let hive_on = hive_enabled_flag;
                             let base_url = provider_base_url.clone();
-                            let sender = sender.clone();
+                            let channel_map_worker = channel_map_arc.clone();
+                            let primary_fallback_worker = primary_fallback.clone();
                             let workspace_path = ws_path.clone();
                             let interrupt_clone = interrupt.clone();
                             let is_heartbeat_clone = is_heartbeat.clone();
@@ -1919,6 +2343,12 @@ async fn main() -> Result<()> {
                             let shared_memory_strategy = shared_memory_strategy_for_worker;
                             let setup_tokens_worker = setup_tokens_clone.clone();
                             let pending_raw_keys_worker = pending_raw_keys_clone.clone();
+                            #[cfg(feature = "browser")]
+                            let login_sessions_worker = login_sessions_clone.clone();
+                            #[cfg(feature = "browser")]
+                            let vault_for_login = vault.clone();
+                            #[cfg(feature = "browser")]
+                            let browser_ref_worker = browser_tool_ref.clone();
                             let usage_store_worker = usage_store_clone.clone();
                             let hive_worker = hive_clone.clone();
                             let worker_chat_id = chat_id.clone();
@@ -1960,6 +2390,13 @@ async fn main() -> Result<()> {
                                     };
 
                                 while let Some(mut msg) = chat_rx.recv().await {
+                                    // Resolve sender per-message from channel map
+                                    let sender: Arc<dyn temm1e_core::Channel> = channel_map_worker
+                                        .get(&msg.channel)
+                                        .cloned()
+                                        .or_else(|| primary_fallback_worker.clone())
+                                        .expect("channel_map is non-empty, checked at gate");
+
                                     // Snapshot for outer panic handler (msg is borrowed by async block)
                                     let panic_chat_id = msg.chat_id.clone();
                                     let panic_msg_id = msg.id.clone();
@@ -1988,7 +2425,7 @@ async fn main() -> Result<()> {
                                         let otk = setup_tokens_worker.generate(&msg.chat_id).await;
                                         let otk_hex = hex::encode(otk);
                                         let link = format!(
-                                            "https://nagisanzenin.github.io/temm1e/setup#{}",
+                                            "https://temm1e-labs.github.io/temm1e/setup#{}",
                                             otk_hex
                                         );
                                         let reply = temm1e_core::types::message::OutboundMessage {
@@ -2237,6 +2674,57 @@ async fn main() -> Result<()> {
                                         return;
                                     }
 
+                                    // /timelimit [seconds] — view or set hive task time limit
+                                    if cmd_lower == "/timelimit"
+                                        || cmd_lower.starts_with("/timelimit ")
+                                    {
+                                        let args = if cmd_lower == "/timelimit" {
+                                            ""
+                                        } else {
+                                            msg_text_cmd.trim()["/timelimit".len()..].trim()
+                                        };
+                                        let response = if args.is_empty() {
+                                            // Show current limit
+                                            if let Some(ref hive) = hive_worker {
+                                                let secs = hive.max_task_duration_secs();
+                                                format!(
+                                                    "Current task time limit: {}s ({}m {}s)",
+                                                    secs,
+                                                    secs / 60,
+                                                    secs % 60
+                                                )
+                                            } else {
+                                                "Hive (swarm) is not enabled.".to_string()
+                                            }
+                                        } else if let Ok(secs) = args.parse::<u64>() {
+                                            if secs < 30 {
+                                                "Time limit must be at least 30 seconds.".to_string()
+                                            } else if let Some(ref hive) = hive_worker {
+                                                hive.set_max_task_duration_secs(secs);
+                                                format!(
+                                                    "Task time limit set to {}s ({}m {}s)",
+                                                    secs,
+                                                    secs / 60,
+                                                    secs % 60
+                                                )
+                                            } else {
+                                                "Hive (swarm) is not enabled.".to_string()
+                                            }
+                                        } else {
+                                            "Usage: /timelimit [seconds]\nExample: /timelimit 1800"
+                                                .to_string()
+                                        };
+                                        let reply = temm1e_core::types::message::OutboundMessage {
+                                            chat_id: msg.chat_id.clone(),
+                                            text: response,
+                                            reply_to: Some(msg.id.clone()),
+                                            parse_mode: None,
+                                        };
+                                        send_with_retry(&*sender, reply).await;
+                                        is_busy_clone.store(false, Ordering::Relaxed);
+                                        return;
+                                    }
+
                                     // /help — list available commands
                                     if cmd_lower == "/help" {
                                         let help_text = format!("\
@@ -2257,6 +2745,12 @@ Available commands:\n\n\
 /mcp add <name> <command-or-url> — Connect a new MCP server\n\
 /mcp remove <name> — Disconnect an MCP server\n\
 /mcp restart <name> — Restart an MCP server\n\
+/browser — Browser status, sessions, and lifecycle\n\
+/browser close — Save sessions and close browser\n\
+/browser sessions — List saved web sessions\n\
+/browser forget <service> — Delete a saved session\n\
+/timelimit — Show current task time limit\n\
+/timelimit <seconds> — Set task time limit (e.g. /timelimit 1800)\n\
 /reload — Hot-reload config and agent (admin)\n\
 /reset — Factory reset all local state (admin)\n\
 /restart — Restart TEMM1E process (admin)\n\n\
@@ -2552,6 +3046,279 @@ Just type a message to chat with the AI agent.",
                                         let reply = temm1e_core::types::message::OutboundMessage {
                                             chat_id: msg.chat_id.clone(),
                                             text: reload_result,
+                                            reply_to: Some(msg.id.clone()),
+                                            parse_mode: None,
+                                        };
+                                        send_with_retry(&*sender, reply).await;
+                                        is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                        return;
+                                    }
+
+                                    // /login <service> <url> — OTK Prowl interactive login session
+                                    #[cfg(feature = "browser")]
+                                    if cmd_lower.starts_with("/login ") || cmd_lower == "/login" {
+                                        let args = msg_text_cmd.trim().strip_prefix("/login").unwrap_or("").trim();
+                                        if args.is_empty() {
+                                            let reply = temm1e_core::types::message::OutboundMessage {
+                                                chat_id: msg.chat_id.clone(),
+                                                text: "Usage: /login <service>\nExamples:\n  /login facebook\n  /login github\n  /login https://mysite.com/login\n  /login myapp https://myapp.com/auth\n\n100+ services supported: facebook, google, github, slack, discord, amazon, netflix, spotify...".to_string(),
+                                                reply_to: Some(msg.id.clone()),
+                                                parse_mode: None,
+                                            };
+                                            send_with_retry(&*sender, reply).await;
+                                            is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                            return;
+                                        }
+
+                                        // Resolve service name → login URL using registry
+                                        let (service_name, login_url) = match temm1e_tools::prowl_blueprints::login_registry::resolve_login_args(args) {
+                                            Some((s, u)) => (s, u),
+                                            None => {
+                                                let reply = temm1e_core::types::message::OutboundMessage {
+                                                    chat_id: msg.chat_id.clone(),
+                                                    text: "Could not parse login target. Try: /login facebook".to_string(),
+                                                    reply_to: Some(msg.id.clone()),
+                                                    parse_mode: None,
+                                                };
+                                                send_with_retry(&*sender, reply).await;
+                                                is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                                return;
+                                            }
+                                        };
+
+                                        tracing::info!(
+                                            service = %service_name,
+                                            url = %login_url,
+                                            chat_id = %msg.chat_id,
+                                            "OTK Prowl login session starting"
+                                        );
+
+                                        // Launch browser and create session via convenience API
+                                        match temm1e_tools::browser_session::InteractiveBrowseSession::launch(
+                                            &service_name, &login_url
+                                        ).await {
+                                            Ok(mut session) => {
+                                                // Capture first annotated screenshot
+                                                match session.capture_annotated().await {
+                                                    Ok((_png, description)) => {
+                                                        let text = format!(
+                                                            "🔐 Login session for '{}'\n\n{}",
+                                                            service_name, description
+                                                        );
+                                                        let reply = temm1e_core::types::message::OutboundMessage {
+                                                            chat_id: msg.chat_id.clone(),
+                                                            text,
+                                                            reply_to: Some(msg.id.clone()),
+                                                            parse_mode: None,
+                                                        };
+                                                        send_with_retry(&*sender, reply).await;
+
+                                                        // Store session for this chat
+                                                        login_sessions_worker.lock().await.insert(
+                                                            msg.chat_id.clone(), session
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        let reply = temm1e_core::types::message::OutboundMessage {
+                                                            chat_id: msg.chat_id.clone(),
+                                                            text: format!("Failed to scan page: {}", e),
+                                                            reply_to: Some(msg.id.clone()),
+                                                            parse_mode: None,
+                                                        };
+                                                        send_with_retry(&*sender, reply).await;
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                let reply = temm1e_core::types::message::OutboundMessage {
+                                                    chat_id: msg.chat_id.clone(),
+                                                    text: format!("Login session failed: {}", e),
+                                                    reply_to: Some(msg.id.clone()),
+                                                    parse_mode: None,
+                                                };
+                                                send_with_retry(&*sender, reply).await;
+                                            }
+                                        }
+
+                                        is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                        return;
+                                    }
+
+                                    // ── Active login session interceptor ──────
+                                    // If this chat has an active login session, route messages there
+                                    // instead of the agent
+                                    #[cfg(feature = "browser")]
+                                    {
+                                        let has_session = login_sessions_worker.lock().await.contains_key(&msg.chat_id);
+                                        if has_session {
+                                            let input = msg_text_cmd.trim();
+                                            let mut sessions = login_sessions_worker.lock().await;
+                                            if let Some(session) = sessions.get_mut(&msg.chat_id) {
+                                                match session.handle_input(input).await {
+                                                    Ok(temm1e_tools::browser_session::SessionAction::Continue) => {
+                                                        // Re-capture and send updated page
+                                                        match session.capture_annotated().await {
+                                                            Ok((_png, description)) => {
+                                                                let reply = temm1e_core::types::message::OutboundMessage {
+                                                                    chat_id: msg.chat_id.clone(),
+                                                                    text: format!("✅ Done\n\n{}", description),
+                                                                    reply_to: Some(msg.id.clone()),
+                                                                    parse_mode: None,
+                                                                };
+                                                                send_with_retry(&*sender, reply).await;
+                                                            }
+                                                            Err(e) => {
+                                                                let reply = temm1e_core::types::message::OutboundMessage {
+                                                                    chat_id: msg.chat_id.clone(),
+                                                                    text: format!("Page scan error: {}", e),
+                                                                    reply_to: Some(msg.id.clone()),
+                                                                    parse_mode: None,
+                                                                };
+                                                                send_with_retry(&*sender, reply).await;
+                                                            }
+                                                        }
+                                                    }
+                                                    Ok(temm1e_tools::browser_session::SessionAction::Done) => {
+                                                        // Capture session to vault
+                                                        if let Some(ref v) = vault_for_login {
+                                                            match session.capture_session(v.as_ref()).await {
+                                                                Ok(()) => {
+                                                                    let svc = session.service().to_string();
+                                                                    sessions.remove(&msg.chat_id);
+                                                                    let reply = temm1e_core::types::message::OutboundMessage {
+                                                                        chat_id: msg.chat_id.clone(),
+                                                                        text: format!("🔒 Session for '{}' saved securely! I can now browse {} for you.", svc, svc),
+                                                                        reply_to: Some(msg.id.clone()),
+                                                                        parse_mode: None,
+                                                                    };
+                                                                    send_with_retry(&*sender, reply).await;
+                                                                }
+                                                                Err(e) => {
+                                                                    let reply = temm1e_core::types::message::OutboundMessage {
+                                                                        chat_id: msg.chat_id.clone(),
+                                                                        text: format!("Session save failed: {}", e),
+                                                                        reply_to: Some(msg.id.clone()),
+                                                                        parse_mode: None,
+                                                                    };
+                                                                    send_with_retry(&*sender, reply).await;
+                                                                }
+                                                            }
+                                                        } else {
+                                                            sessions.remove(&msg.chat_id);
+                                                            let reply = temm1e_core::types::message::OutboundMessage {
+                                                                chat_id: msg.chat_id.clone(),
+                                                                text: "Login complete but vault not available — session not saved.".to_string(),
+                                                                reply_to: Some(msg.id.clone()),
+                                                                parse_mode: None,
+                                                            };
+                                                            send_with_retry(&*sender, reply).await;
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        let reply = temm1e_core::types::message::OutboundMessage {
+                                                            chat_id: msg.chat_id.clone(),
+                                                            text: format!("⚠️ {}", e),
+                                                            reply_to: Some(msg.id.clone()),
+                                                            parse_mode: None,
+                                                        };
+                                                        send_with_retry(&*sender, reply).await;
+                                                    }
+                                                }
+                                            }
+                                            is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                            return;
+                                        }
+                                    }
+
+                                    // /browser — browser lifecycle management (V2)
+                                    #[cfg(feature = "browser")]
+                                    if cmd_lower == "/browser" || cmd_lower.starts_with("/browser ") {
+                                        let browser_args = if cmd_lower == "/browser" {
+                                            ""
+                                        } else {
+                                            msg_text_cmd.trim().strip_prefix("/browser").unwrap_or("").trim()
+                                        };
+                                        let browser_args_lower = browser_args.to_lowercase();
+
+                                        let response_text = if browser_args_lower.is_empty() || browser_args_lower == "status" {
+                                            // /browser or /browser status — report state
+                                            match &browser_ref_worker {
+                                                Some(bt) => {
+                                                    if bt.is_running() {
+                                                        let domains = bt.get_active_domains();
+                                                        let sessions_str = if domains.is_empty() {
+                                                            "none".to_string()
+                                                        } else {
+                                                            let mut sorted: Vec<_> = domains.into_iter().collect();
+                                                            sorted.sort();
+                                                            sorted.join(", ")
+                                                        };
+                                                        let uptime = bt.uptime().unwrap_or_else(|| "unknown".to_string());
+                                                        format!(
+                                                            "\u{1f310} Browser: Active\nSessions: {}\nUptime: {}",
+                                                            sessions_str, uptime
+                                                        )
+                                                    } else {
+                                                        "\u{1f310} Browser: Inactive. Will start on next web task.".to_string()
+                                                    }
+                                                }
+                                                None => "\u{1f310} Browser: Not configured.".to_string(),
+                                            }
+                                        } else if browser_args_lower == "close" {
+                                            // /browser close — auto-capture and close
+                                            match &browser_ref_worker {
+                                                Some(bt) => {
+                                                    let (msg, saved) = bt.close_with_capture().await;
+                                                    if saved.is_empty() {
+                                                        format!("\u{1f512} {}", msg)
+                                                    } else {
+                                                        format!(
+                                                            "\u{1f4be} Sessions saved: {}\n\u{1f512} {}",
+                                                            saved.join(", "), msg
+                                                        )
+                                                    }
+                                                }
+                                                None => "Browser not configured.".to_string(),
+                                            }
+                                        } else if browser_args_lower == "sessions" {
+                                            // /browser sessions — list saved vault sessions
+                                            match &browser_ref_worker {
+                                                Some(bt) => {
+                                                    let sessions = bt.list_saved_sessions().await;
+                                                    if sessions.is_empty() {
+                                                        "\u{1f4cb} No saved sessions.".to_string()
+                                                    } else {
+                                                        let mut lines = vec!["\u{1f4cb} Saved sessions:".to_string()];
+                                                        for (service, captured_at) in &sessions {
+                                                            let age = format_capture_age(captured_at);
+                                                            lines.push(format!("- {} (captured {})", service, age));
+                                                        }
+                                                        lines.join("\n")
+                                                    }
+                                                }
+                                                None => "Browser not configured.".to_string(),
+                                            }
+                                        } else if browser_args_lower.starts_with("forget ") {
+                                            // /browser forget <service>
+                                            let service = browser_args["forget ".len()..].trim();
+                                            if service.is_empty() {
+                                                "Usage: /browser forget <service>".to_string()
+                                            } else {
+                                                match &browser_ref_worker {
+                                                    Some(bt) => match bt.forget_session(service).await {
+                                                        Ok(()) => format!("\u{1f5d1}\u{fe0f} Session for '{}' deleted.", service),
+                                                        Err(e) => format!("Failed: {}", e),
+                                                    },
+                                                    None => "Browser not configured.".to_string(),
+                                                }
+                                            }
+                                        } else {
+                                            "Usage: /browser [status|close|sessions|forget <service>]".to_string()
+                                        };
+
+                                        let reply = temm1e_core::types::message::OutboundMessage {
+                                            chat_id: msg.chat_id.clone(),
+                                            text: response_text,
                                             reply_to: Some(msg.id.clone()),
                                             parse_mode: None,
                                         };
@@ -3169,14 +3936,35 @@ Just type a message to chat with the AI agent.",
                                                                 }
                                                             }
                                                         } else {
-                                                            tracing::info!("Alpha: decomposition failed or not worth it, no pack");
-                                                            let reply = temm1e_core::types::message::OutboundMessage {
-                                                                chat_id: msg.chat_id.clone(),
-                                                                text: "Task classified as complex but decomposition wasn't viable. Please try rephrasing or breaking it down.".into(),
-                                                                reply_to: Some(msg.id.clone()),
-                                                                parse_mode: None,
-                                                            };
-                                                            send_with_retry(&*sender, reply).await;
+                                                            // Decomposition wasn't viable — fall back to single-agent processing
+                                                            tracing::info!("Alpha: decomposition failed or not worth it, falling back to single-agent");
+                                                            let fallback_agent = Arc::new(temm1e_agent::AgentRuntime::with_limits(
+                                                                agent.provider_arc(),
+                                                                memory.clone(),
+                                                                tools_template.clone(),
+                                                                agent.model().to_string(),
+                                                                Some(build_system_prompt()),
+                                                                max_turns, max_ctx, max_rounds, max_task_duration, max_spend,
+                                                            ).with_v2_optimizations(v2_opt).with_parallel_phases(pp_opt).with_shared_mode(shared_mode.clone()).with_shared_memory_strategy(shared_memory_strategy.clone()));
+                                                            let fallback_cancel = cancel_token_clone.clone();
+                                                            match fallback_agent.process_message(&msg, &mut session, Some(interrupt_clone.clone()), Some(pending_for_worker.clone()), None, None, Some(fallback_cancel)).await {
+                                                                Ok((mut reply, _usage)) => {
+                                                                    reply.text = censor_secrets(&reply.text);
+                                                                    if !reply.text.trim().is_empty() {
+                                                                        send_with_retry(&*sender, reply).await;
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    tracing::error!(error = %e, "Single-agent fallback failed");
+                                                                    let reply = temm1e_core::types::message::OutboundMessage {
+                                                                        chat_id: msg.chat_id.clone(),
+                                                                        text: censor_secrets(&format_user_error(&e)),
+                                                                        reply_to: Some(msg.id.clone()),
+                                                                        parse_mode: None,
+                                                                    };
+                                                                    send_with_retry(&*sender, reply).await;
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -3478,7 +4266,7 @@ Just type a message to chat with the AI agent.",
                                             let otk = setup_tokens_worker.generate(&msg.chat_id).await;
                                             let otk_hex = hex::encode(otk);
                                             let link = format!(
-                                                "https://nagisanzenin.github.io/temm1e/setup#{}",
+                                                "https://temm1e-labs.github.io/temm1e/setup#{}",
                                                 otk_hex
                                             );
                                             let reply = temm1e_core::types::message::OutboundMessage {
@@ -3633,7 +4421,15 @@ Just type a message to chat with the AI agent.",
                     config.gateway.host, config.gateway.port
                 );
             } else {
-                println!("  Status: Onboarding — send your API key via Telegram");
+                let channel_names: Vec<&str> = channel_map.keys().map(|s| s.as_str()).collect();
+                if channel_names.is_empty() {
+                    println!("  Status: No channels configured — set TELEGRAM_BOT_TOKEN or DISCORD_BOT_TOKEN");
+                } else {
+                    println!(
+                        "  Status: Onboarding — send your API key via {}",
+                        channel_names.join(" or ")
+                    );
+                }
             }
 
             // Block until Ctrl+C, then drain gracefully
@@ -3743,6 +4539,20 @@ Just type a message to chat with the AI agent.",
             let usage_store: Arc<dyn temm1e_core::UsageStore> =
                 Arc::new(temm1e_memory::SqliteUsageStore::new(&memory_url).await?);
 
+            // ── Vault (encrypted credential store) ───────────────
+            let vault: Option<Arc<dyn temm1e_core::Vault>> = match temm1e_vault::LocalVault::new()
+                .await
+            {
+                Ok(v) => {
+                    tracing::info!("Vault initialized (CLI)");
+                    Some(Arc::new(v) as Arc<dyn temm1e_core::Vault>)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Vault initialization failed — browser authenticate disabled");
+                    None
+                }
+            };
+
             // ── Tools ──────────────────────────────────────────
             let pending_messages: temm1e_tools::PendingMessages =
                 Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
@@ -3756,6 +4566,18 @@ Just type a message to chat with the AI agent.",
             > = Arc::new(tokio::sync::RwLock::new(
                 temm1e_core::types::config::MemoryStrategy::Lambda,
             ));
+            #[cfg(feature = "browser")]
+            let (mut tools_template, cli_browser_ref) = temm1e_tools::create_tools_with_browser(
+                &config.tools,
+                Some(censored_cli),
+                Some(pending_messages.clone()),
+                Some(memory.clone()),
+                Some(Arc::new(setup_tokens.clone()) as Arc<dyn temm1e_core::SetupLinkGenerator>),
+                Some(usage_store.clone()),
+                Some(shared_mode.clone()),
+                vault.clone(),
+            );
+            #[cfg(not(feature = "browser"))]
             let mut tools_template = temm1e_tools::create_tools(
                 &config.tools,
                 Some(censored_cli),
@@ -3764,6 +4586,7 @@ Just type a message to chat with the AI agent.",
                 Some(Arc::new(setup_tokens.clone()) as Arc<dyn temm1e_core::SetupLinkGenerator>),
                 Some(usage_store.clone()),
                 Some(shared_mode.clone()),
+                vault.clone(),
             );
 
             // ── Custom script tools (user/agent-authored) ──────
@@ -3948,7 +4771,7 @@ Just type a message to chat with the AI agent.",
                 // Auto-generate OTK and show setup link immediately
                 let otk = setup_tokens.generate("cli").await;
                 let otk_hex = hex::encode(otk);
-                let link = format!("https://nagisanzenin.github.io/temm1e/setup#{}", otk_hex);
+                let link = format!("https://temm1e-labs.github.io/temm1e/setup#{}", otk_hex);
                 println!("\n{}", onboarding_message_with_link(&link));
                 println!("\n{}", ONBOARDING_REFERENCE);
             }
@@ -3985,7 +4808,7 @@ Just type a message to chat with the AI agent.",
                 if cmd_lower == "/addkey" {
                     let otk = setup_tokens.generate(&msg.chat_id).await;
                     let otk_hex = hex::encode(otk);
-                    let link = format!("https://nagisanzenin.github.io/temm1e/setup#{}", otk_hex);
+                    let link = format!("https://temm1e-labs.github.io/temm1e/setup#{}", otk_hex);
                     println!(
                         "\nSecure key setup:\n\n\
                          1. Open this link:\n{}\n\n\
@@ -4073,6 +4896,10 @@ Just type a message to chat with the AI agent.",
                          /mcp add <name> <command-or-url> — Connect a new MCP server\n\
                          /mcp remove <name> — Disconnect an MCP server\n\
                          /mcp restart <name> — Restart an MCP server\n\
+                         /browser — Browser status, sessions, and lifecycle\n\
+                         /browser close — Save sessions and close browser\n\
+                         /browser sessions — List saved web sessions\n\
+                         /browser forget <service> — Delete a saved session\n\
                          /quit — Exit the CLI chat\n\n\
                          Just type a message to chat with the AI agent.\n",
                         env!("CARGO_PKG_VERSION"),
@@ -4328,10 +5155,146 @@ Just type a message to chat with the AI agent.",
                     continue;
                 }
 
+                // /browser — browser lifecycle management (V2)
+                #[cfg(feature = "browser")]
+                if cmd_lower == "/browser" || cmd_lower.starts_with("/browser ") {
+                    let browser_args = if cmd_lower == "/browser" {
+                        ""
+                    } else {
+                        msg_text
+                            .trim()
+                            .strip_prefix("/browser")
+                            .unwrap_or("")
+                            .trim()
+                    };
+                    let browser_args_lower = browser_args.to_lowercase();
+
+                    if browser_args_lower.is_empty() || browser_args_lower == "status" {
+                        match &cli_browser_ref {
+                            Some(bt) => {
+                                if bt.is_running() {
+                                    let domains = bt.get_active_domains();
+                                    let sessions_str = if domains.is_empty() {
+                                        "none".to_string()
+                                    } else {
+                                        let mut sorted: Vec<_> = domains.into_iter().collect();
+                                        sorted.sort();
+                                        sorted.join(", ")
+                                    };
+                                    let uptime =
+                                        bt.uptime().unwrap_or_else(|| "unknown".to_string());
+                                    println!(
+                                        "\nBrowser: Active\nSessions: {}\nUptime: {}\n",
+                                        sessions_str, uptime
+                                    );
+                                } else {
+                                    println!("\nBrowser: Inactive. Will start on next web task.\n");
+                                }
+                            }
+                            None => println!("\nBrowser: Not configured.\n"),
+                        }
+                    } else if browser_args_lower == "close" {
+                        match &cli_browser_ref {
+                            Some(bt) => {
+                                let (msg, saved) = bt.close_with_capture().await;
+                                if !saved.is_empty() {
+                                    println!("\nSessions saved: {}", saved.join(", "));
+                                }
+                                println!("{}\n", msg);
+                            }
+                            None => println!("\nBrowser not configured.\n"),
+                        }
+                    } else if browser_args_lower == "sessions" {
+                        match &cli_browser_ref {
+                            Some(bt) => {
+                                let sessions = bt.list_saved_sessions().await;
+                                if sessions.is_empty() {
+                                    println!("\nNo saved sessions.\n");
+                                } else {
+                                    println!("\nSaved sessions:");
+                                    for (service, captured_at) in &sessions {
+                                        let age = format_capture_age(captured_at);
+                                        println!("  - {} (captured {})", service, age);
+                                    }
+                                    println!();
+                                }
+                            }
+                            None => println!("\nBrowser not configured.\n"),
+                        }
+                    } else if browser_args_lower.starts_with("forget ") {
+                        let service = browser_args["forget ".len()..].trim();
+                        if service.is_empty() {
+                            println!("\nUsage: /browser forget <service>\n");
+                        } else {
+                            match &cli_browser_ref {
+                                Some(bt) => match bt.forget_session(service).await {
+                                    Ok(()) => println!("\nSession for \'{}\' deleted.\n", service),
+                                    Err(e) => println!("\nFailed: {}\n", e),
+                                },
+                                None => println!("\nBrowser not configured.\n"),
+                            }
+                        }
+                    } else {
+                        println!("\nUsage: /browser [status|close|sessions|forget <service>]\n");
+                    }
+                    eprint!("temm1e> ");
+                    continue;
+                }
+
                 // /restart — not applicable in CLI mode
                 if cmd_lower == "/restart" {
                     println!("\n/restart is only available in server mode (temm1e start).");
                     println!("In CLI mode, just exit and re-run: temm1e chat\n");
+                    eprint!("temm1e> ");
+                    continue;
+                }
+
+                // /login <service> <url> — interactive OTK browser login session
+                #[cfg(feature = "browser")]
+                if cmd_lower.starts_with("/login ") {
+                    let login_args = msg_text.trim()["/login".len()..].trim();
+                    let parts: Vec<&str> = login_args.splitn(2, ' ').collect();
+                    if parts.len() < 2 || parts[1].trim().is_empty() {
+                        println!(
+                            "\nUsage: /login <service> <url>\n\n\
+                             Start an interactive browser login session.\n\
+                             You'll see numbered interactive elements — type a number to click,\n\
+                             type text to fill a focused field, or type 'done' to finish.\n\n\
+                             Example: /login github https://github.com/login\n"
+                        );
+                    } else {
+                        let service = parts[0];
+                        let url = parts[1].trim();
+                        match &vault {
+                            None => {
+                                println!(
+                                    "\nVault not available — cannot store session credentials.\n"
+                                );
+                            }
+                            Some(vault_ref) => {
+                                println!(
+                                    "\nStarting interactive login for '{}' at {}\n\
+                                     Launching browser...\n",
+                                    service, url
+                                );
+                                // Launch browser and create session
+                                match temm1e_tools::browser_session_login(
+                                    service,
+                                    url,
+                                    vault_ref.as_ref(),
+                                )
+                                .await
+                                {
+                                    Ok(summary) => {
+                                        println!("\n{}\n", summary);
+                                    }
+                                    Err(e) => {
+                                        println!("\nLogin session failed: {}\n", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
                     eprint!("temm1e> ");
                     continue;
                 }
@@ -4637,7 +5600,7 @@ Just type a message to chat with the AI agent.",
                     // Auto-generate fresh OTK for onboarding
                     let otk = setup_tokens.generate("cli").await;
                     let otk_hex = hex::encode(otk);
-                    let link = format!("https://nagisanzenin.github.io/temm1e/setup#{}", otk_hex);
+                    let link = format!("https://temm1e-labs.github.io/temm1e/setup#{}", otk_hex);
                     println!("\n{}", onboarding_message_with_link(&link));
                     println!("\n{}\n", ONBOARDING_REFERENCE);
                     eprint!("temm1e> ");
@@ -4923,6 +5886,9 @@ Just type a message to chat with the AI agent.",
         #[cfg(feature = "tui")]
         Commands::Tui => {
             temm1e_tui::launch_tui(config).await?;
+        }
+        Commands::Setup => {
+            run_setup_wizard().await?;
         }
     }
 

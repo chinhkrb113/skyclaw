@@ -23,7 +23,7 @@ members = [
 ]
 
 [workspace.package]
-version = "3.0.0"
+version = "3.3.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/nagisanzenin/temm1e"
@@ -54,6 +54,13 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "postgres"] }
 teloxide = { version = "0.17", features = ["macros"] }
 serenity = { version = "0.12", features = ["gateway", "model"] }
 poise = "0.6"
+wa-rs = { version = "0.2", default-features = false, features = ["sqlite-storage", "tokio-transport", "ureq-client", "tokio-native"] }
+wa-rs-core = { version = "0.2", default-features = false }
+wa-rs-binary = { version = "0.2", default-features = false }
+wa-rs-sqlite-storage = "0.2"
+wa-rs-tokio-transport = "0.2"
+wa-rs-ureq-http = "0.2"
+qrcode = "0.14"
 
 # Crypto
 chacha20poly1305 = "0.10"
@@ -73,6 +80,7 @@ tracing-opentelemetry = "0.28"
 
 # Browser
 chromiumoxide = { version = "0.7", features = ["tokio-runtime"] }
+htmd = "0.5"
 
 # Object storage
 aws-sdk-s3 = "1"
@@ -170,9 +178,10 @@ uuid.workspace = true
 chrono.workspace = true
 futures.workspace = true
 tokio-util.workspace = true
+openssl = { version = "0.10", features = ["vendored"], optional = true }
 
 [features]
-default = ["telegram", "browser", "mcp", "codex-oauth"]
+default = ["telegram", "discord", "browser", "mcp", "codex-oauth"]
 telegram = ["temm1e-channels/telegram"]
 discord = ["temm1e-channels/discord"]
 slack = ["temm1e-channels/slack"]
@@ -181,6 +190,9 @@ postgres = ["temm1e-memory/postgres"]
 mcp = ["dep:temm1e-mcp"]
 codex-oauth = ["dep:temm1e-codex-oauth"]
 tui = ["dep:temm1e-tui"]
+whatsapp = ["temm1e-channels/whatsapp"]
+whatsapp-web = ["temm1e-channels/whatsapp-web"]
+openssl-vendored = ["dep:openssl"]
 
 [profile.release]
 opt-level = "z"
